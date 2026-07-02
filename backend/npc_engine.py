@@ -1,6 +1,6 @@
 """
 npc_engine.py — NPC state machine, dialogue orchestrator, trust calculator.
-Full dialogue loop: recall() → Claude → remember() × 4 types → rumor mill trigger.
+Full dialogue loop: recall() → Gemini → remember() × 4 types → rumor mill trigger.
 """
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ ACTION_TRUST_DELTAS: dict[str, int] = {
     "help": +15,
     "pay": +10,
     "compliment": +8,
-    "bribe": -5,   # NPCs don't like being bribed (suspicious)
+    "bribe": -5,
 }
 
 # Provenance query triggers
@@ -66,11 +66,11 @@ async def process_dialogue(
     1. recall() with GRAPH_COMPLETION for deep context
     2. Detect provenance query → second multi-hop recall()
     3. Build NPC system prompt
-    4. Generate response via Claude tool-calling
+    4. Generate response via Gemini JSON mode
     5. remember() all 4 typed entries (qa, trace, feedback, skill_run)
     6. Auto-trigger rumor mill every 3 turns
     """
-    dataset_id = f"world_{world_id}"
+    dataset_name = f"world_{world_id}"
     session_id = get_session_id(world_id, npc_id)
     ts = int(time.time())
     npc = NPC_DEFINITIONS[npc_id]
@@ -82,17 +82,22 @@ async def process_dialogue(
     # ----------------------------------------------------------------
     # STEP 1: recall() — GRAPH_COMPLETION for deep context
     # ----------------------------------------------------------------
-    recall_result = await cognee.recall(
-        query=(
-            f"What do I know about the player? "
-            f"What have I heard from other NPCs? "
-            f"What recent events involved the player? "
-            f"Any rumors, trust changes, or crimes?"
-        ),
-        dataset_id=dataset_id,
-        session_id=session_id,
-        graph_traversal=True,
-    )
+    try:
+        recall_result = await cognee.recall(
+            query=(
+                f"What do I know about the player? "
+                f"What have I heard from other NPCs? "
+                f"What recent events involved the player? "
+                f"Any rumors, trust changes, or crimes?"
+            ),
+            dataset_name=dataset_name,
+            session_id=session_id,
+            graph_traversal=True,
+        )
+    except Exception as e:
+        logger.warning(f"recall() failed for {npc_id}, continuing with empty context: {e}")
+        from backend.schemas import RecallResult
+        recall_result = RecallResult()
 
     # ----------------------------------------------------------------
     # STEP 2: Check for provenance query → multi-hop chain
@@ -103,26 +108,32 @@ async def process_dialogue(
 
     if is_provenance_query:
         logger.info(f"Provenance query detected for {npc_id}: '{player_message}'")
-        prov_result = await cognee.recall(
-            query=(
-                f"Who is the original source of information about the player being "
-                f"untrustworthy, a thief, or a criminal? "
-                f"Trace the complete information propagation path from origin to {npc_id}. "
-                f"Show the chain: player action → NPC reaction → rumor → target NPC."
-            ),
-            dataset_id=dataset_id,
-            graph_traversal=True,
-        )
-        provenance_chain = [
-            {
-                "step": i + 1,
-                "document_id": n.get("document_id", n.get("id", "unknown")),
-                "type": n.get("type", "unknown"),
-                "content_preview": str(n.get("content", ""))[:60],
-                "timestamp": str(n.get("metadata", {}).get("timestamp", "")),
-            }
-            for i, n in enumerate(prov_result.nodes[:5])
-        ]
+        try:
+            prov_result = await cognee.recall(
+                query=(
+                    f"Who is the original source of information about the player being "
+                    f"untrustworthy, a thief, or a criminal? "
+                    f"Trace the complete information propagation path from origin to {npc_id}. "
+                    f"Show the chain: player action → NPC reaction → rumor → target NPC."
+                ),
+                dataset_name=dataset_name,
+                graph_traversal=True,
+            )
+            provenance_chain = [
+                {
+                    "step": i + 1,
+                    "document_id": item.get("document_id") or item.get("dataset_id") or f"node_{i}",
+                    "type": item.get("kind", item.get("search_type", "graph_completion")),
+                    "content_preview": str(
+                        item.get("text", item.get("raw", {}).get("value", ""))
+                    )[:60],
+                    "timestamp": str(item.get("metadata", {}).get("timestamp", "")),
+                }
+                for i, item in enumerate(prov_result.nodes[:5])
+                if isinstance(item, dict)
+            ]
+        except Exception as e:
+            logger.warning(f"Provenance recall failed: {e}")
 
     # ----------------------------------------------------------------
     # STEP 3: Build NPC system prompt
@@ -140,9 +151,12 @@ async def process_dialogue(
     )
 
     rumor_note = ""
-    if any(c.type in ("skill_run", "rumor") for c in recall_result.citations):
+    if any(
+        "rumor" in str(c.type).lower() or "skill" in str(c.type).lower()
+        for c in recall_result.citations
+    ):
         rumor_note = (
-            "\nRUMOR AWARENESS: Some of your memory comes from rumors (type=skill_run or rumor). "
+            "\nRUMOR AWARENESS: Some of your memory comes from rumors. "
             "If referencing rumor-sourced knowledge, say 'I heard from [source]...' rather "
             "than stating it as direct fact."
         )
@@ -175,81 +189,100 @@ RULES:
 2. Trust level MUST influence tone. Low trust = curt/suspicious. High trust = warm/helpful.
 3. If drawing on a rumor, reference your source: "I heard from [NPC name]..."
 4. Provenance query ("who told you?") → trace your source chain naturally in dialogue.
-5. Keep response under 120 words. Be sharp. No asterisks or stage directions.
-6. Use the npc_response tool to structure your output."""
+5. Keep response under 120 words. Be sharp. No asterisks or stage directions."""
 
     # ----------------------------------------------------------------
-    # STEP 4: Generate NPC response via Claude tool-calling
+    # STEP 4: Generate NPC response via Gemini
     # ----------------------------------------------------------------
-    if is_provenance_query and provenance_chain:
-        response_text = await generate_provenance_narrative(
-            npc.name, provenance_chain, recall_result.graph_context
-        )
+    try:
+        if is_provenance_query and provenance_chain:
+            response_text = await generate_provenance_narrative(
+                npc.name, provenance_chain, recall_result.graph_context
+            )
+            trust_delta = 0
+            action = "none"
+        else:
+            response_text, trust_delta, action = await generate_npc_response(
+                system_prompt=system_prompt,
+                player_message=player_message,
+                npc_name=npc.name,
+            )
+    except Exception as e:
+        logger.error(f"LLM call failed for {npc_id}, using fallback: {e}")
+        response_text = f"{npc.name} pauses before responding."
         trust_delta = 0
         action = "none"
-    else:
-        response_text, trust_delta, action = await generate_npc_response(
-            system_prompt=system_prompt,
-            player_message=player_message,
-            npc_name=npc.name,
+
+    # ----------------------------------------------------------------
+    # STEP 5: remember() all 4 typed entries
+    # ----------------------------------------------------------------
+
+    # qa: the dialogue turn itself — returns entry_id for chaining feedback
+    qa_entry_id = ""
+    try:
+        qa_entry_id = await cognee.remember_qa(
+            question=player_message,
+            answer=response_text,
+            context=(
+                f"NPC: {npc.name} | Trust: {trust}/100 | Day: {game_day} | Turn: {turn_count}"
+            ),
+            dataset_name=dataset_name,
+            session_id=session_id,
         )
-
-    # ----------------------------------------------------------------
-    # STEP 5: remember() all typed entries
-    # ----------------------------------------------------------------
-
-    # qa: the dialogue turn itself
-    await cognee.remember_entry(
-        entry_type="qa",
-        content=f"Player: {player_message}\n{npc.name}: {response_text}",
-        dataset_id=dataset_id,
-        session_id=session_id,
-        document_id=f"qa_{npc_id}_{ts}",
-    )
+    except Exception as e:
+        logger.warning(f"remember_qa failed: {e}")
 
     # trace: NPC internal reasoning
-    await cognee.remember_entry(
-        entry_type="trace",
-        content=(
-            f"{npc.name} reasoning at turn {turn_count} (game day {game_day}): "
-            f"Trust={trust}/100, Trajectory={trajectory}. "
-            f"Memory nodes used: {[c.document_id for c in recall_result.citations[:3]]}. "
-            f"Decision: trust_delta={trust_delta}, action={action}. "
-            f"Player message classified as: "
-            f"{'hostile' if trust_delta < -5 else 'neutral' if trust_delta == 0 else 'friendly'}. "
-            f"Provenance query: {is_provenance_query}."
-        ),
-        dataset_id=dataset_id,
-        document_id=f"trace_{npc_id}_{ts}",
-    )
+    try:
+        await cognee.remember_trace(
+            origin_function=f"npc_dialogue_{npc_id}",
+            memory_query=player_message,
+            memory_context=(
+                f"Turn {turn_count}, Day {game_day}. Trust={trust}/100, Trajectory={trajectory}. "
+                f"Cited nodes: {[c.document_id for c in recall_result.citations[:3]]}. "
+                f"trust_delta={trust_delta}, action={action}. "
+                f"Provenance query: {is_provenance_query}."
+            ),
+            dataset_name=dataset_name,
+            session_id=session_id,
+        )
+    except Exception as e:
+        logger.warning(f"remember_trace failed: {e}")
 
-    # feedback: trust update with bi-temporal metadata
+    # feedback: bi-temporal trust update — chained to qa_entry_id if available
     new_trust = update_trust(world_id, npc_id, trust_delta, event="dialogue")
     now_iso = datetime.now(timezone.utc).isoformat()
-    await cognee.remember_entry(
-        entry_type="feedback",
-        content=(
-            f"Trust update for {npc.name}: {trust} → {new_trust} (delta={trust_delta}). "
-            f"Reason: player dialogue at turn {turn_count}, game day {game_day}. "
-            f"valid_from={now_iso}, game_day={game_day}. "
-            f"Player message: '{player_message[:100]}'"
-        ),
-        dataset_id=dataset_id,
-        document_id=f"trust_{npc_id}_{ts}",
-    )
+    try:
+        if qa_entry_id:
+            await cognee.remember_feedback(
+                qa_id=qa_entry_id,
+                feedback_text=(
+                    f"Trust {trust} → {new_trust} (delta={trust_delta:+d}). "
+                    f"Day {game_day}. valid_from={now_iso}."
+                ),
+                feedback_score=trust_delta,
+                dataset_name=dataset_name,
+                session_id=session_id,
+            )
+    except Exception as e:
+        logger.warning(f"remember_feedback failed: {e}")
 
-    # skill_run: NPC action record (if action taken)
+    # skill_run: NPC action (if triggered)
     if action != "none":
-        await cognee.remember_entry(
-            entry_type="skill_run",
-            content=(
-                f"{npc.name} executed action '{action}' on game day {game_day}. "
-                f"Triggered by player dialogue at turn {turn_count}. "
-                f"Trust at time of action: {trust}/100."
-            ),
-            dataset_id=dataset_id,
-            document_id=f"skill_{npc_id}_{action}_{ts}",
-        )
+        try:
+            await cognee.remember_skill_run(
+                run_id=f"skill_{npc_id}_{action}_{ts}",
+                skill_id=action,
+                task_text=f"{npc.name} triggered '{action}' after player dialogue on Day {game_day}.",
+                result_summary=(
+                    f"Action '{action}' executed. Trust at time: {trust}/100. Turn: {turn_count}."
+                ),
+                dataset_name=dataset_name,
+                session_id=session_id,
+                success_score=1.0,
+            )
+        except Exception as e:
+            logger.warning(f"remember_skill_run failed: {e}")
 
     # Broadcast trust update via WebSocket
     if ws_manager:
@@ -288,62 +321,70 @@ async def process_action(
     world_id: str,
     ws_manager=None,
 ) -> dict:
-    """
-    Record a player action (betray, steal, help, pay, etc.) as typed memory.
-    Updates trust + stores bi-temporal TrustEdge with feedback entry.
-    """
-    dataset_id = f"world_{world_id}"
+    """Record a player action as typed memory. Updates trust."""
+    dataset_name = f"world_{world_id}"
     ts = int(time.time())
     npc = NPC_DEFINITIONS[npc_id]
     trust = get_trust(world_id, npc_id)
     game_day = get_game_day(world_id)
     now_iso = datetime.now(timezone.utc).isoformat()
+    session_id = get_session_id(world_id, npc_id)
 
     delta = ACTION_TRUST_DELTAS.get(action_type, 0)
     new_trust = update_trust(world_id, npc_id, delta, event=action_type)
 
-    # feedback: the action event itself
-    await cognee.remember_entry(
-        entry_type="feedback",
-        content=(
-            f"PLAYER_ACTION: {action_type.upper()} against {npc.name} on game day {game_day}. "
-            f"Trust before: {trust}/100. Trust after: {new_trust}/100 (delta={delta}). "
-            f"valid_from={now_iso}, game_day={game_day}. "
-            f"This event is now part of {npc.name}'s permanent memory."
-        ),
-        dataset_id=dataset_id,
-        document_id=f"feedback_{npc_id}_{action_type}_{ts}",
-    )
-
-    # trace: NPC awareness of the action
-    await cognee.remember_entry(
-        entry_type="trace",
-        content=(
-            f"{npc.name} witnessed or learned of player action '{action_type}' "
-            f"on game day {game_day}. "
-            f"Trust impact: {delta:+d} (now {new_trust}/100). "
-            f"valid_from={now_iso}. "
-            f"Rumor threshold {'CROSSED — will warn others' if new_trust < 40 else 'not crossed'}."
-        ),
-        dataset_id=dataset_id,
-        document_id=f"trace_{npc_id}_{action_type}_{ts}",
-    )
-
-    # skill_run: NPC reaction (warn others if trust drops below 40)
-    if new_trust < 40 and delta < 0:
-        await cognee.remember_entry(
-            entry_type="skill_run",
-            content=(
-                f"{npc.name} initiated WARN_OTHERS protocol after player action '{action_type}'. "
-                f"Trust score {new_trust}/100 has crossed warning threshold (40). "
-                f"Rumor behavior: {npc.rumor_behavior}. "
-                f"Other NPCs will receive warning via next improve() call."
-            ),
-            dataset_id=dataset_id,
-            document_id=f"skill_{npc_id}_warn_{ts}",
+    try:
+        qa_id = await cognee.remember_qa(
+            question=f"[ACTION] Player performed '{action_type}' against {npc.name}",
+            answer=f"{npc.name} witnessed '{action_type}'. Trust impact: {delta:+d}.",
+            context=f"Day {game_day}. valid_from={now_iso}.",
+            dataset_name=dataset_name,
+            session_id=session_id,
         )
+        if qa_id:
+            await cognee.remember_feedback(
+                qa_id=qa_id,
+                feedback_text=(
+                    f"PLAYER_ACTION {action_type.upper()} on Day {game_day}. "
+                    f"Trust: {trust} → {new_trust}."
+                ),
+                feedback_score=delta,
+                dataset_name=dataset_name,
+                session_id=session_id,
+            )
+    except Exception as e:
+        logger.warning(f"action remember failed: {e}")
 
-    # Broadcast trust update
+    try:
+        await cognee.remember_trace(
+            origin_function=f"player_action_{action_type}",
+            memory_query=action_type,
+            memory_context=(
+                f"{npc.name} witnessed '{action_type}' on Day {game_day}. "
+                f"Trust: {trust} → {new_trust}. valid_from={now_iso}. "
+                f"Rumor threshold {'CROSSED' if new_trust < 40 else 'OK'}."
+            ),
+            dataset_name=dataset_name,
+            session_id=session_id,
+        )
+    except Exception as e:
+        logger.warning(f"action trace failed: {e}")
+
+    if new_trust < 40 and delta < 0:
+        try:
+            await cognee.remember_skill_run(
+                run_id=f"skill_{npc_id}_warn_{ts}",
+                skill_id="warn_others",
+                task_text=f"{npc.name} warns other NPCs after '{action_type}'.",
+                result_summary=(
+                    f"Rumor behavior: {npc.rumor_behavior}. Trust={new_trust}/100. Day {game_day}."
+                ),
+                dataset_name=dataset_name,
+                success_score=1.0,
+            )
+        except Exception as e:
+            logger.warning(f"action skill_run failed: {e}")
+
     if ws_manager:
         await ws_manager.broadcast(
             world_id,
@@ -382,46 +423,39 @@ async def cast_amnesia(
     world_id: str,
     ws_manager=None,
 ) -> dict:
-    """
-    Player spends 50 gold to surgically remove a specific memory from an NPC.
-    Calls DELETE at document_id granularity — does NOT nuke entire NPC memory.
-    """
-    dataset_id = f"world_{world_id}"
+    """Spend 50 gold to surgically remove one memory from an NPC."""
+    dataset_name = f"world_{world_id}"
     ts = int(time.time())
     game_day = get_game_day(world_id)
     gold = get_gold(world_id)
+    session_id = get_session_id(world_id, npc_id)
 
     if gold < 50:
         raise ValueError(f"Not enough gold. Amnesia costs 50g, you have {gold}g.")
 
     remaining_gold = deduct_gold(world_id, 50)
 
-    # SURGICAL DELETE — document_id level, not dataset level
-    result = await cognee.forget_document(dataset_id, document_id)
+    result = await cognee.forget_document(dataset_name, document_id)
 
-    # Record the forgetting itself as a trace entry
-    await cognee.remember_entry(
-        entry_type="trace",
-        content=(
-            f"AMNESIA_SPELL cast on {npc_id} at game day {game_day}. "
-            f"Memory erased: {document_id}. "
-            f"Player spent 50 gold. "
-            f"Next recall() by {npc_id} will not surface this memory node. "
-            f"The forgetting itself is now a permanent trace in the knowledge graph."
-        ),
-        dataset_id=dataset_id,
-        document_id=f"amnesia_{npc_id}_{ts}",
-    )
+    try:
+        await cognee.remember_trace(
+            origin_function="amnesia_spell",
+            memory_query=f"erase {document_id}",
+            memory_context=(
+                f"AMNESIA_SPELL cast on {npc_id} at Day {game_day}. "
+                f"Memory erased: {document_id}. Player spent 50 gold. "
+                f"The forgetting is now a permanent trace in the knowledge graph."
+            ),
+            dataset_name=dataset_name,
+            session_id=session_id,
+        )
+    except Exception as e:
+        logger.warning(f"amnesia trace failed: {e}")
 
-    # Push dissolve animation to frontend
     if ws_manager:
         await ws_manager.broadcast(
             world_id,
-            {
-                "type": "node_dissolve",
-                "document_id": document_id,
-                "npc_id": npc_id,
-            },
+            {"type": "node_dissolve", "document_id": document_id, "npc_id": npc_id},
         )
 
     logger.info(f"Amnesia cast: {npc_id} forgot {document_id}. Gold remaining: {remaining_gold}")
@@ -431,7 +465,7 @@ async def cast_amnesia(
         "document_id_erased": document_id,
         "gold_remaining": remaining_gold,
         "message": (
-            f"Memory '{document_id}' has been erased from {NPC_DEFINITIONS[npc_id].name}'s mind. "
+            f"Memory '{document_id}' erased from {NPC_DEFINITIONS[npc_id].name}'s mind. "
             f"-50 gold. {remaining_gold}g remaining."
         ),
     }

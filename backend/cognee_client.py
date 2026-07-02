@@ -1,12 +1,25 @@
 """
 cognee_client.py — Single source of truth for ALL Cognee Cloud REST calls.
-Never call Cognee API from anywhere else in the codebase.
+Shapes verified against /openapi.json on tenant instance.
+
+Endpoint corrections vs original assumptions:
+  - recall()        → returns list[ResultItem], not dict
+  - remember_entry()→ {"entry": {...}, "dataset_name": str, "session_id": str}
+  - QAEntry         → {type, question, answer, context}
+  - TraceEntry      → {type, origin_function, status, memory_query, memory_context}
+  - FeedbackEntry   → {type, qa_id, feedback_text, feedback_score}
+  - SkillRunEntry   → {type, run_id, selected_skill_id, task_text, result_summary}
+  - graph           → GET /api/v1/datasets/{uuid}/graph  (needs real UUID)
+  - forget          → POST /api/v1/forget {dataset, dataId?}
+  - add content     → POST /api/v1/add_text {text_data: [...], datasetName}
+  - process graph   → POST /api/v1/cognify {datasets: [name]}
 """
 from __future__ import annotations
 
 import logging
 import os
-from typing import Literal, Optional
+import time
+from typing import Optional
 
 import httpx
 from dotenv import load_dotenv
@@ -30,247 +43,404 @@ HEADERS = {
 # Timeout config (seconds)
 _SHORT = 30.0
 _RECALL = 45.0
-_IMPROVE = 120.0  # improve() is a heavy cloud pipeline
+_COGNIFY = 120.0
 
 
 class CogneeClient:
-    """Async Cognee Cloud REST client."""
+    """Async Cognee Cloud REST client — all shapes verified from /openapi.json."""
 
     # ------------------------------------------------------------------
-    # Ontology
+    # Dataset UUID cache (name → UUID)
+    # ------------------------------------------------------------------
+    _dataset_uuid_cache: dict[str, str] = {}
+
+    async def _get_dataset_uuid(self, dataset_name: str) -> Optional[str]:
+        """Resolve dataset name → UUID for graph endpoint."""
+        if dataset_name in self._dataset_uuid_cache:
+            return self._dataset_uuid_cache[dataset_name]
+        try:
+            async with httpx.AsyncClient(follow_redirects=True) as c:
+                r = await c.get(
+                    f"{COGNEE_BASE}/api/v1/datasets/",
+                    headers=HEADERS,
+                    timeout=_SHORT,
+                )
+            if r.status_code == 200:
+                data = r.json()
+                if isinstance(data, list):
+                    for ds in data:
+                        if isinstance(ds, dict):
+                            name = ds.get("name", "") or ds.get("dataset_name", "")
+                            uid = ds.get("id", "") or ds.get("dataset_id", "")
+                            if name and uid:
+                                self._dataset_uuid_cache[name] = uid
+                return self._dataset_uuid_cache.get(dataset_name)
+        except Exception as e:
+            logger.warning(f"Could not resolve dataset UUID for {dataset_name}: {e}")
+        return None
+
+    # ------------------------------------------------------------------
+    # World init — add_text + cognify to build initial graph
     # ------------------------------------------------------------------
 
-    async def apply_ontology(self, ttl_content: str, dataset_id: str) -> dict:
+    async def init_dataset(self, dataset_name: str, seed_texts: list[str]) -> dict:
         """
-        POST /api/v1/ontology/apply
-        Apply OWL ontology to ground NPC entities. Called once on world init.
+        POST /api/v1/add_text — ingest NPC backstory text into the dataset.
+        POST /api/v1/cognify  — build knowledge graph from ingested text.
+        Called once on world init to seed the graph with NPC knowledge.
         """
-        logger.info(f"Applying ontology to dataset: {dataset_id}")
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{COGNEE_BASE}/api/v1/ontology/apply",
+        logger.info(f"Seeding dataset '{dataset_name}' with {len(seed_texts)} texts")
+        result = {}
+        async with httpx.AsyncClient(follow_redirects=True) as c:
+            # Add text
+            r = await c.post(
+                f"{COGNEE_BASE}/api/v1/add_text",
                 headers=HEADERS,
-                json={"ontology": ttl_content, "dataset_id": dataset_id},
+                json={"text_data": seed_texts, "datasetName": dataset_name},
                 timeout=_SHORT,
             )
-        self._log_response("apply_ontology", resp)
-        return resp.json() if resp.content else {}
+            self._log_response("add_text", r)
+            result["add"] = r.json() if r.content else {}
+
+            # Cognify — build knowledge graph
+            r2 = await c.post(
+                f"{COGNEE_BASE}/api/v1/cognify",
+                headers=HEADERS,
+                json={"datasets": [dataset_name]},
+                timeout=_COGNIFY,
+            )
+            self._log_response("cognify", r2)
+            result["cognify"] = r2.json() if r2.content else {}
+
+        return result
 
     # ------------------------------------------------------------------
-    # remember/entry — core typed memory writes
+    # remember/entry — typed memory writes (4 types)
     # ------------------------------------------------------------------
 
-    async def remember_entry(
+    async def remember_qa(
         self,
-        entry_type: Literal["qa", "skill_run", "feedback", "trace"],
-        content: str,
-        dataset_id: str,
-        document_id: str,
-        session_id: Optional[str] = None,
+        question: str,
+        answer: str,
+        dataset_name: str,
+        session_id: str,
+        context: str = "",
+    ) -> str:
+        """
+        POST /api/v1/remember/entry — QAEntry
+        Stores a dialogue exchange. Returns entry_id for chaining feedback.
+        """
+        payload = {
+            "entry": {
+                "type": "qa",
+                "question": question,
+                "answer": answer,
+                "context": context,
+            },
+            "dataset_name": dataset_name,
+            "session_id": session_id,
+        }
+        resp = await self._post_remember(payload)
+        return resp.get("entry_id", resp.get("qa_id", ""))
+
+    async def remember_trace(
+        self,
+        origin_function: str,
+        memory_query: str,
+        memory_context: str,
+        dataset_name: str,
+        session_id: str,
+        status: str = "success",
+    ) -> str:
+        """
+        POST /api/v1/remember/entry — TraceEntry
+        Records NPC reasoning + which memory nodes were used for this turn.
+        """
+        payload = {
+            "entry": {
+                "type": "trace",
+                "origin_function": origin_function,
+                "status": status,
+                "memory_query": memory_query,
+                "memory_context": memory_context,
+            },
+            "dataset_name": dataset_name,
+            "session_id": session_id,
+        }
+        resp = await self._post_remember(payload)
+        return resp.get("entry_id", "")
+
+    async def remember_feedback(
+        self,
+        qa_id: str,
+        feedback_text: str,
+        feedback_score: int,
+        dataset_name: str,
+        session_id: str,
     ) -> dict:
         """
-        POST /api/v1/remember/entry
-        Typed memory entry — all 4 types used throughout the game:
-          qa        → dialogue turns
-          skill_run → NPC actions + rumor seeds
-          feedback  → trust updates + player behavior records
-          trace     → NPC reasoning + amnesia records
+        POST /api/v1/remember/entry — FeedbackEntry (bi-temporal trust update)
+        Chained to an existing qa_id — the trust delta is the feedback_score.
+        """
+        payload = {
+            "entry": {
+                "type": "feedback",
+                "qa_id": qa_id,
+                "feedback_text": feedback_text,
+                "feedback_score": feedback_score,
+            },
+            "dataset_name": dataset_name,
+            "session_id": session_id,
+        }
+        return await self._post_remember(payload)
+
+    async def remember_skill_run(
+        self,
+        run_id: str,
+        skill_id: str,
+        task_text: str,
+        result_summary: str,
+        dataset_name: str,
+        session_id: Optional[str] = None,
+        success_score: float = 1.0,
+    ) -> dict:
+        """
+        POST /api/v1/remember/entry — SkillRunEntry
+        Records NPC actions and rumor seeds. No session required.
         """
         payload: dict = {
-            "type": entry_type,
-            "content": content,
-            "dataset_id": dataset_id,
-            "document_id": document_id,
+            "entry": {
+                "type": "skill_run",
+                "run_id": run_id,
+                "selected_skill_id": skill_id,
+                "task_text": task_text,
+                "result_summary": result_summary,
+                "success_score": success_score,
+            },
+            "dataset_name": dataset_name,
         }
         if session_id:
             payload["session_id"] = session_id
+        return await self._post_remember(payload)
 
-        logger.debug(
-            f"remember_entry type={entry_type} doc_id={document_id} dataset={dataset_id}"
-        )
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
+    async def _post_remember(self, payload: dict) -> dict:
+        async with httpx.AsyncClient(follow_redirects=True) as c:
+            r = await c.post(
                 f"{COGNEE_BASE}/api/v1/remember/entry",
                 headers=HEADERS,
                 json=payload,
                 timeout=_SHORT,
             )
-        self._log_response("remember_entry", resp)
-        return resp.json() if resp.content else {}
+        self._log_response("remember_entry", r)
+        if r.content:
+            try:
+                return r.json()
+            except Exception:
+                pass
+        return {}
 
     # ------------------------------------------------------------------
-    # recall — multi-hop GRAPH_COMPLETION retrieval
+    # recall — multi-hop graph retrieval
     # ------------------------------------------------------------------
 
     async def recall(
         self,
         query: str,
-        dataset_id: str,
+        dataset_name: str,
         session_id: Optional[str] = None,
         graph_traversal: bool = True,
     ) -> RecallResult:
         """
         POST /api/v1/recall
-        Returns ranked nodes with metadata for citation log.
-        graph_traversal=True enables multi-hop GRAPH_COMPLETION.
+        Returns list[ResultItem] — each has: kind, text, score, metadata, raw
+        graph_traversal=True uses GRAPH_COMPLETION mode.
         """
         payload: dict = {
             "query": query,
-            "dataset_id": dataset_id,
-            "graph_traversal": graph_traversal,
+            "dataset_name": dataset_name,
+            "search_type": "GRAPH_COMPLETION" if graph_traversal else "CHUNKS",
         }
         if session_id:
             payload["session_id"] = session_id
 
-        logger.info(f"recall() query='{query[:60]}...' dataset={dataset_id} traversal={graph_traversal}")
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
+        logger.info(f"recall() query='{query[:60]}...' dataset={dataset_name}")
+        async with httpx.AsyncClient(follow_redirects=True) as c:
+            r = await c.post(
                 f"{COGNEE_BASE}/api/v1/recall",
                 headers=HEADERS,
                 json=payload,
                 timeout=_RECALL,
             )
-        self._log_response("recall", resp)
+        self._log_response("recall", r)
 
-        if not resp.content:
+        if not r.content:
             return RecallResult()
 
-        data = resp.json()
-        citations = self._extract_citations(data)
+        data = r.json()
+
+        # Cognee recall returns a list of result items
+        if isinstance(data, list):
+            items = data
+        elif isinstance(data, dict):
+            items = data.get("results", data.get("nodes", [data]))
+        else:
+            items = []
+
+        # Build graph context from text fields
+        texts = [
+            item.get("text", item.get("raw", {}).get("value", ""))
+            for item in items
+            if isinstance(item, dict)
+        ]
+        graph_context = "\n\n".join(t for t in texts if t)
+
+        citations = self._extract_citations(items)
         return RecallResult(
-            nodes=data.get("nodes", []),
-            graph_context=data.get("graph_context", data.get("context", "")),
+            nodes=items,
+            graph_context=graph_context,
             citations=citations,
         )
 
-    def _extract_citations(self, recall_response: dict) -> list[CitationEntry]:
-        """Extract top-5 ranked, citable nodes for the citation log UI."""
+    def _extract_citations(self, items: list) -> list[CitationEntry]:
+        """Build citation log entries from recall result items."""
         citations: list[CitationEntry] = []
-        for node in recall_response.get("nodes", [])[:5]:
+        for item in items[:5]:
+            if not isinstance(item, dict):
+                continue
+            text = item.get("text", item.get("raw", {}).get("value", ""))
+            doc_id = (
+                item.get("document_id")
+                or item.get("data_id")
+                or item.get("dataset_id", "")
+                or "graph_node"
+            )
             citations.append(
                 CitationEntry(
-                    document_id=node.get("document_id", node.get("id", "unknown")),
-                    type=node.get("type", "unknown"),
-                    timestamp=str(node.get("metadata", {}).get("timestamp", "")),
-                    content_preview=str(node.get("content", ""))[:80],
-                    score=float(node.get("score", node.get("relevance", 0.0))),
+                    document_id=str(doc_id),
+                    type=item.get("kind", item.get("search_type", "graph_completion")),
+                    timestamp=str(item.get("metadata", {}).get("timestamp", "")),
+                    content_preview=str(text)[:100],
+                    score=float(item.get("score") or 0.0),
                 )
             )
         return citations
 
     # ------------------------------------------------------------------
-    # improve — THE RUMOR MILL (post-ingestion graph enrichment)
+    # cognify — THE RUMOR MILL (build/enrich knowledge graph)
     # ------------------------------------------------------------------
 
-    async def improve(self, dataset_id: str) -> dict:
+    async def improve(self, dataset_name: str) -> dict:
         """
-        POST /api/v1/improve
-        Triggers post-ingestion graph enrichment on Cognee Cloud.
-        Creates cross-NPC rumor edges from structured rumor seed entries.
-        Heavy pipeline — called via asyncio.create_task() (fire-and-forget).
+        POST /api/v1/cognify  — triggers post-ingestion graph enrichment.
+        THE RUMOR MILL. Called via asyncio.create_task() — fire-and-forget.
+        Creates cross-NPC edges from structured rumor seed text.
         """
-        logger.info(f"Invoking improve() for dataset: {dataset_id}")
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{COGNEE_BASE}/api/v1/improve",
+        logger.info(f"Invoking cognify (rumor mill) for dataset: {dataset_name}")
+        async with httpx.AsyncClient(follow_redirects=True) as c:
+            r = await c.post(
+                f"{COGNEE_BASE}/api/v1/cognify",
                 headers=HEADERS,
-                json={"dataset_id": dataset_id},
-                timeout=_IMPROVE,
+                json={"datasets": [dataset_name]},
+                timeout=_COGNIFY,
             )
-        self._log_response("improve", resp)
-        return resp.json() if resp.content else {}
+        self._log_response("cognify/improve", r)
+        return r.json() if r.content else {}
 
     # ------------------------------------------------------------------
-    # forget — AMNESIA SPELL (surgical document_id deletion)
+    # forget — AMNESIA SPELL
     # ------------------------------------------------------------------
 
-    async def forget_document(self, dataset_id: str, document_id: str) -> dict:
+    async def forget_document(self, dataset_name: str, data_id: str) -> dict:
         """
-        DELETE /api/v1/datasets/{dataset_id}/documents/{document_id}
-        Surgical forget at document_id granularity.
-        Does NOT nuke entire dataset — severs only this specific memory node.
+        POST /api/v1/forget — surgical forget by data_id within a dataset.
+        Severs only the targeted memory node. Does NOT nuke entire dataset.
         """
-        logger.info(f"forget_document() dataset={dataset_id} doc_id={document_id}")
-        async with httpx.AsyncClient() as client:
-            resp = await client.delete(
-                f"{COGNEE_BASE}/api/v1/datasets/{dataset_id}/documents/{document_id}",
+        logger.info(f"forget_document() dataset={dataset_name} data_id={data_id}")
+        async with httpx.AsyncClient(follow_redirects=True) as c:
+            r = await c.post(
+                f"{COGNEE_BASE}/api/v1/forget",
                 headers=HEADERS,
+                json={"dataset": dataset_name, "dataId": data_id},
                 timeout=_SHORT,
             )
-        self._log_response("forget_document", resp)
-        return resp.json() if resp.content else {"status": "deleted"}
+        self._log_response("forget", r)
+        return r.json() if r.content else {"status": "forgotten"}
 
     # ------------------------------------------------------------------
-    # graph — Live graph for react-force-graph-2d
+    # graph — live visualization
     # ------------------------------------------------------------------
 
-    async def get_graph(self, dataset_id: str) -> GraphData:
+    async def get_graph(self, dataset_name: str) -> GraphData:
         """
-        GET /api/v1/graph?dataset_id=...
-        Returns nodes + edges with types and metadata for visualization.
+        GET /api/v1/datasets/{uuid}/graph — returns nodes + edges for visualization.
+        Resolves dataset name → UUID first.
         """
-        logger.info(f"get_graph() dataset={dataset_id}")
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"{COGNEE_BASE}/api/v1/graph",
-                headers=HEADERS,
-                params={"dataset_id": dataset_id},
-                timeout=_SHORT,
-            )
-        self._log_response("get_graph", resp)
-
-        if not resp.content:
+        logger.info(f"get_graph() dataset={dataset_name}")
+        uid = await self._get_dataset_uuid(dataset_name)
+        if not uid:
+            logger.warning(f"No UUID found for dataset '{dataset_name}', returning empty graph")
             return GraphData()
 
-        data = resp.json()
-        return GraphData(
-            nodes=data.get("nodes", []),
-            edges=data.get("edges", data.get("links", [])),
-        )
-
-    # ------------------------------------------------------------------
-    # documents — list forgettable document_ids (Amnesia Modal)
-    # ------------------------------------------------------------------
-
-    async def list_documents(self, dataset_id: str, npc_id: str) -> list[dict]:
-        """
-        GET /api/v1/datasets/{dataset_id}/documents
-        Lists document_ids for a specific NPC (filtered by npc_id prefix).
-        Used by amnesia modal to show what the player can make NPCs forget.
-        """
-        logger.info(f"list_documents() dataset={dataset_id} npc_id={npc_id}")
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"{COGNEE_BASE}/api/v1/datasets/{dataset_id}/documents",
+        async with httpx.AsyncClient(follow_redirects=True) as c:
+            r = await c.get(
+                f"{COGNEE_BASE}/api/v1/datasets/{uid}/graph",
                 headers=HEADERS,
-                params={"prefix": f"{npc_id}_"},
                 timeout=_SHORT,
             )
-        self._log_response("list_documents", resp)
+        self._log_response("get_graph", r)
 
-        if not resp.content:
+        if not r.content or r.status_code == 404:
+            return GraphData()
+
+        data = r.json()
+        if isinstance(data, dict):
+            return GraphData(
+                nodes=data.get("nodes", []),
+                edges=data.get("edges", data.get("links", [])),
+            )
+        return GraphData()
+
+    # ------------------------------------------------------------------
+    # list documents for Amnesia Modal
+    # ------------------------------------------------------------------
+
+    async def list_documents(self, dataset_name: str, npc_id: str) -> list[dict]:
+        """
+        GET /api/v1/datasets/{uuid}/data — list data items for a dataset.
+        Filtered to items belonging to this NPC.
+        """
+        logger.info(f"list_documents() dataset={dataset_name} npc={npc_id}")
+        uid = await self._get_dataset_uuid(dataset_name)
+        if not uid:
             return []
 
-        docs = resp.json()
-        if isinstance(docs, dict):
-            docs = docs.get("documents", [])
+        async with httpx.AsyncClient(follow_redirects=True) as c:
+            r = await c.get(
+                f"{COGNEE_BASE}/api/v1/datasets/{uid}/data",
+                headers=HEADERS,
+                timeout=_SHORT,
+            )
+        self._log_response("list_documents", r)
 
-        # Filter: only return documents owned by this NPC
+        if not r.content or r.status_code >= 400:
+            return []
+
+        data = r.json()
+        items = data if isinstance(data, list) else data.get("data", [])
         return [
-            d for d in docs
+            d for d in items
             if isinstance(d, dict)
-            and d.get("document_id", "").startswith(npc_id)
-        ]
+            and npc_id in str(d.get("name", "") + str(d.get("id", "")))
+        ][:20]
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
     def _log_response(self, method: str, resp: httpx.Response) -> None:
-        """Log every Cognee response for debugging — never suppress errors."""
         if resp.status_code >= 400:
             logger.error(
-                f"Cognee {method} returned HTTP {resp.status_code}: {resp.text[:300]}"
+                f"Cognee {method} HTTP {resp.status_code}: {resp.text[:300]}"
             )
         else:
             logger.debug(f"Cognee {method} HTTP {resp.status_code}")

@@ -40,7 +40,7 @@ async def trigger_rumor_mill(
       graph_updated    → full graph refresh after improve() completes
       trust_update     → NPC trust bars update
     """
-    dataset_id = f"world_{world_id}"
+    dataset_name = f"world_{world_id}"
     ts = int(time.time())
     game_day = get_game_day(world_id)
 
@@ -74,11 +74,16 @@ async def trigger_rumor_mill(
                 )
 
                 try:
-                    await cognee.remember_entry(
-                        entry_type="skill_run",
-                        content=content,
-                        dataset_id=dataset_id,
-                        document_id=doc_id,
+                    await cognee.remember_skill_run(
+                        run_id=doc_id,
+                        skill_id="rumor_propagation",
+                        task_text=(
+                            f"{source_npc.name} warns {target_npc.name} about the player. "
+                            f"Trust score={trust}/100, below warning threshold."
+                        ),
+                        result_summary=content,
+                        dataset_name=dataset_name,
+                        success_score=1.0,
                     )
                     rumors_injected += 1
                     logger.info(
@@ -105,7 +110,7 @@ async def trigger_rumor_mill(
     # WebSocket pushes graph_updated when pipeline completes.
     # ----------------------------------------------------------------
     asyncio.create_task(
-        _run_async_improvement(world_id, dataset_id, ws_manager)
+        _run_async_improvement(world_id, dataset_name, ws_manager)
     )
 
     # ----------------------------------------------------------------

@@ -136,77 +136,70 @@ async def health() -> dict:
 @app.post("/world/init", response_model=WorldInitResponse)
 async def init_world(body: WorldInitRequest) -> WorldInitResponse:
     """
-    Create dataset, apply OWL ontology, seed 3 NPCs, seed secrets.
+    Seed NPC backstories into Cognee Cloud via add_text + cognify.
     Must be called before any other endpoints.
     """
     world_id = body.world_name
-    dataset_id = f"world_{world_id}"
+    dataset_name = f"world_{world_id}"
     logger.info(f"Initializing world: {world_id}")
 
-    # 1. Apply OWL ontology to ground NPC entities
-    try:
-        ontology_path = os.path.join(os.path.dirname(__file__), "ontology.ttl")
-        with open(ontology_path) as f:
-            ttl = f.read()
-        await cognee.apply_ontology(ttl, dataset_id)
-        logger.info(f"Ontology applied to {dataset_id}")
-    except Exception as e:
-        logger.warning(f"Ontology apply failed (continuing): {e}")
+    # 1. Collect all NPC seed texts and push via add_text + cognify
+    seed_texts: list[str] = []
+    for npc_id, npc in NPC_DEFINITIONS.items():
+        seed_texts.append(npc.full_backstory)
+        seed_texts.append(npc.skills_description)
+        seed_texts.append(npc.secret)
 
-    # 2. Seed each NPC's identity and skills + initial trust
+    try:
+        await cognee.init_dataset(dataset_name, seed_texts)
+        logger.info(f"Dataset '{dataset_name}' seeded with {len(seed_texts)} texts")
+    except Exception as e:
+        logger.warning(f"init_dataset failed (continuing): {e}")
+
+    # 2. Write typed memory entries for each NPC
     npcs_seeded: list[str] = []
     for npc_id, npc in NPC_DEFINITIONS.items():
-        ts = int(time.time())
+        session_id = f"{dataset_name}_{npc_id}_init"
         try:
-            # Personality + backstory as trace entry
-            await cognee.remember_entry(
-                "trace",
-                npc.full_backstory,
-                dataset_id,
-                f"npc_seed_{npc_id}",
+            # Backstory as trace
+            await cognee.remember_trace(
+                origin_function=f"world_init_{npc_id}",
+                memory_query=f"{npc.name} identity",
+                memory_context=npc.full_backstory,
+                dataset_name=dataset_name,
+                session_id=session_id,
             )
-            # Skills as skill_run entry
-            await cognee.remember_entry(
-                "skill_run",
-                npc.skills_description,
-                dataset_id,
-                f"npc_skills_{npc_id}",
+            # Skills also as trace (skill_run requires pre-registered skill IDs)
+            await cognee.remember_trace(
+                origin_function=f"npc_skills_{npc_id}",
+                memory_query=f"{npc.name} available skills",
+                memory_context=npc.skills_description,
+                dataset_name=dataset_name,
+                session_id=session_id,
             )
-            # Initial trust as feedback entry
+            # Initial trust as qa
             now_iso = datetime.now(timezone.utc).isoformat()
-            await cognee.remember_entry(
-                "feedback",
-                (
-                    f"{npc.name} starts with trust score {npc.initial_trust}/100 "
-                    f"for unknown player. "
+            await cognee.remember_qa(
+                question=f"What is {npc.name}'s initial disposition toward the player?",
+                answer=(
+                    f"{npc.name} starts with trust score {npc.initial_trust}/100. "
                     f"valid_from={now_iso}, game_day=0."
                 ),
-                dataset_id,
-                f"trust_init_{npc_id}",
+                context=f"World init. NPC: {npc_id}.",
+                dataset_name=dataset_name,
+                session_id=session_id,
             )
             npcs_seeded.append(npc_id)
             logger.info(f"Seeded NPC: {npc_id}")
         except Exception as e:
             logger.error(f"Failed to seed NPC {npc_id}: {e}")
 
-    # 3. Seed NPC secrets (discoverable via multi-hop recall)
-    for npc_id, npc in NPC_DEFINITIONS.items():
-        try:
-            await cognee.remember_entry(
-                "trace",
-                npc.secret,
-                dataset_id,
-                f"secret_{npc_id}",
-            )
-        except Exception as e:
-            logger.error(f"Failed to seed secret for {npc_id}: {e}")
-
-    # 4. Initialize in-memory game state
+    # 3. Initialize in-memory game state
     init_world_state(world_id)
 
     return WorldInitResponse(
         world_id=world_id,
-        dataset_id=dataset_id,
+        dataset_id=dataset_name,
         status="ready",
         npcs_seeded=npcs_seeded,
     )
