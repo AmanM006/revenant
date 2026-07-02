@@ -252,18 +252,23 @@ class CogneeClient:
     ) -> RecallResult:
         """
         POST /api/v1/recall
-        Returns list[ResultItem] — each has: kind, text, score, metadata, raw
-        graph_traversal=True uses GRAPH_COMPLETION mode.
+        Uses CHUNKS search (vector similarity) by default.
+        GRAPH_COMPLETION is avoided — it triggers Cognee's internal LLM which
+        can fail with 'model output must contain either output text or tool calls'.
+        We enrich the context ourselves via Gemini.
         """
+        # Always use CHUNKS — reliable, fast, no internal LLM dependency
+        search_type = "CHUNKS"
+
         payload: dict = {
             "query": query,
             "dataset_name": dataset_name,
-            "search_type": "GRAPH_COMPLETION" if graph_traversal else "CHUNKS",
+            "search_type": search_type,
         }
         if session_id:
             payload["session_id"] = session_id
 
-        logger.info(f"recall() query='{query[:60]}...' dataset={dataset_name}")
+        logger.info(f"recall() query='{query[:60]}...' dataset={dataset_name} search={search_type}")
         async with httpx.AsyncClient(follow_redirects=True) as c:
             r = await c.post(
                 f"{COGNEE_BASE}/api/v1/recall",
