@@ -29,7 +29,14 @@ logger = logging.getLogger("revenant.llm")
 _client = genai.Client(api_key=os.getenv("GEMINI_API_KEY", ""))
 
 # Models confirmed available — try each in order
-MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"]
+MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-flash-latest",
+    "gemini-flash-lite-latest",
+]
 
 # ---------------------------------------------------------------------------
 # System instruction
@@ -68,7 +75,7 @@ async def generate_npc_response(
     )
 
     for attempt, model_name in enumerate(MODELS):
-        # Exponential backoff only for 2nd+ attempts on same model
+        # Brief backoff before trying next model
         if attempt > 0:
             await asyncio.sleep(1)
 
@@ -79,7 +86,7 @@ async def generate_npc_response(
                 config=types.GenerateContentConfig(
                     system_instruction=_SYSTEM,
                     temperature=0.85,
-                    max_output_tokens=1500,  # Raised from 600 to prevent truncation
+                    max_output_tokens=1500,  # Prevent truncation
                 ),
             )
 
@@ -106,6 +113,8 @@ async def generate_npc_response(
             err = str(e)
             if any(k in err for k in ("RESOURCE_EXHAUSTED", "429", "quota")):
                 logger.warning(f"Rate limit on {model_name}, trying next model...")
+            elif "503" in err or "UNAVAILABLE" in err:
+                logger.warning(f"Model {model_name} temporarily unavailable (503), trying next model...")
             else:
                 logger.error(f"Gemini error ({model_name}) for {npc_name}: {e}")
             continue
@@ -189,7 +198,6 @@ async def generate_provenance_narrative(
             if response.text:
                 return response.text.strip()
         except Exception as e:
-            if any(k in str(e) for k in ("RESOURCE_EXHAUSTED", "429")):
-                continue
-            break
+            logger.warning(f"Provenance generation failed on {model_name}: {e}")
+            continue
     return "I have my sources. Best leave it at that."
