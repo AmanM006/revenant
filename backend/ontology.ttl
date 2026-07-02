@@ -1,0 +1,185 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix rev: <http://revenant.game/ontology#> .
+
+# ============================================================
+# Revenant Ontology — NPC Cognitive State Engine
+# Applied via cognee.apply_ontology() on world init
+# ============================================================
+
+# ---- Entity Types ----
+
+rev:NPC a owl:Class ;
+    rdfs:label "NPC" ;
+    rdfs:comment "A non-player character with persistent memory and social relationships." .
+
+rev:Player a owl:Class ;
+    rdfs:label "Player" ;
+    rdfs:comment "The human player interacting with the game world." .
+
+rev:InteractionEvent a owl:Class ;
+    rdfs:label "InteractionEvent" ;
+    rdfs:comment "A recorded interaction between the Player and an NPC." .
+
+rev:Rumor a owl:Class ;
+    rdfs:label "Rumor" ;
+    rdfs:comment "Unverified information propagated between NPCs via the improve() pipeline." .
+
+rev:TrustEdge a owl:Class ;
+    rdfs:label "TrustEdge" ;
+    rdfs:comment "A bi-temporal trust relationship from an NPC toward the Player." .
+
+rev:ActionEvent a owl:Class ;
+    rdfs:label "ActionEvent" ;
+    rdfs:comment "A player action (betray, steal, help, pay) recorded as feedback memory." .
+
+rev:SecretFact a owl:Class ;
+    rdfs:label "SecretFact" ;
+    rdfs:comment "Hidden information discoverable via multi-hop graph traversal." .
+
+# ---- NPC Properties ----
+
+rev:npcId a owl:DatatypeProperty ;
+    rdfs:domain rev:NPC ;
+    rdfs:range xsd:string ;
+    rdfs:label "npcId" .
+
+rev:role a owl:DatatypeProperty ;
+    rdfs:domain rev:NPC ;
+    rdfs:range xsd:string ;
+    rdfs:label "role" .
+
+rev:personality a owl:DatatypeProperty ;
+    rdfs:domain rev:NPC ;
+    rdfs:range xsd:string ;
+    rdfs:label "personality" .
+
+rev:rumorBehavior a owl:DatatypeProperty ;
+    rdfs:domain rev:NPC ;
+    rdfs:range xsd:string ;
+    rdfs:label "rumorBehavior" .
+
+# ---- TrustEdge Bi-temporal Properties (COGXFact compatible) ----
+
+rev:trustScore a owl:DatatypeProperty ;
+    rdfs:domain rev:TrustEdge ;
+    rdfs:range xsd:integer ;
+    rdfs:label "trustScore" ;
+    rdfs:comment "Current trust score 0-100." .
+
+rev:validFrom a owl:DatatypeProperty ;
+    rdfs:domain rev:TrustEdge ;
+    rdfs:range xsd:dateTime ;
+    rdfs:label "validFrom" ;
+    rdfs:comment "Timestamp when this trust state became valid (transaction time)." .
+
+rev:validUntil a owl:DatatypeProperty ;
+    rdfs:domain rev:TrustEdge ;
+    rdfs:range xsd:dateTime ;
+    rdfs:label "validUntil" ;
+    rdfs:comment "Timestamp when this trust state was superseded. Open interval if still current." .
+
+rev:trustDelta a owl:DatatypeProperty ;
+    rdfs:domain rev:TrustEdge ;
+    rdfs:range xsd:integer ;
+    rdfs:label "trustDelta" ;
+    rdfs:comment "Signed change in trust score that created this state." .
+
+rev:trustEvent a owl:DatatypeProperty ;
+    rdfs:domain rev:TrustEdge ;
+    rdfs:range xsd:string ;
+    rdfs:label "trustEvent" ;
+    rdfs:comment "Human-readable event that caused trust change (e.g. betrayal, payment, rumor)." .
+
+rev:gameDay a owl:DatatypeProperty ;
+    rdfs:domain rev:TrustEdge ;
+    rdfs:range xsd:integer ;
+    rdfs:label "gameDay" ;
+    rdfs:comment "Game day on which this trust change occurred." .
+
+# ---- Rumor Properties ----
+
+rev:sourceNPC a owl:ObjectProperty ;
+    rdfs:domain rev:Rumor ;
+    rdfs:range rev:NPC ;
+    rdfs:label "sourceNPC" ;
+    rdfs:comment "The NPC that originated or propagated this rumor." .
+
+rev:targetNPC a owl:ObjectProperty ;
+    rdfs:domain rev:Rumor ;
+    rdfs:range rev:NPC ;
+    rdfs:label "targetNPC" ;
+    rdfs:comment "The NPC that received and now holds this rumor in memory." .
+
+rev:propagatedAt a owl:DatatypeProperty ;
+    rdfs:domain rev:Rumor ;
+    rdfs:range xsd:dateTime ;
+    rdfs:label "propagatedAt" .
+
+rev:rumorContent a owl:DatatypeProperty ;
+    rdfs:domain rev:Rumor ;
+    rdfs:range xsd:string ;
+    rdfs:label "rumorContent" .
+
+rev:propagationType a owl:DatatypeProperty ;
+    rdfs:domain rev:Rumor ;
+    rdfs:range xsd:string ;
+    rdfs:label "propagationType" ;
+    rdfs:comment "How the rumor was spread (direct_warning, overheard, improve_pipeline)." .
+
+# ---- InteractionEvent Properties ----
+
+rev:participant a owl:ObjectProperty ;
+    rdfs:domain rev:InteractionEvent ;
+    rdfs:range rev:NPC ;
+    rdfs:label "participant" .
+
+rev:eventType a owl:DatatypeProperty ;
+    rdfs:domain rev:InteractionEvent ;
+    rdfs:range xsd:string ;
+    rdfs:label "eventType" ;
+    rdfs:comment "Type of event: qa, skill_run, feedback, trace." .
+
+rev:gameDay a owl:DatatypeProperty ;
+    rdfs:domain rev:InteractionEvent ;
+    rdfs:range xsd:integer ;
+    rdfs:label "gameDay" .
+
+rev:documentId a owl:DatatypeProperty ;
+    rdfs:domain rev:InteractionEvent ;
+    rdfs:range xsd:string ;
+    rdfs:label "documentId" ;
+    rdfs:comment "Cognee document_id for surgical forget() targeting." .
+
+# ---- ActionEvent Properties ----
+
+rev:actionPerformed a owl:DatatypeProperty ;
+    rdfs:domain rev:ActionEvent ;
+    rdfs:range xsd:string ;
+    rdfs:label "actionPerformed" ;
+    rdfs:comment "The specific action: betray, steal, help, pay, insult, compliment, bribe." .
+
+rev:trustImpact a owl:DatatypeProperty ;
+    rdfs:domain rev:ActionEvent ;
+    rdfs:range xsd:integer ;
+    rdfs:label "trustImpact" .
+
+# ---- SecretFact Properties ----
+
+rev:secretHolder a owl:ObjectProperty ;
+    rdfs:domain rev:SecretFact ;
+    rdfs:range rev:NPC ;
+    rdfs:label "secretHolder" .
+
+rev:discoveryQuery a owl:DatatypeProperty ;
+    rdfs:domain rev:SecretFact ;
+    rdfs:range xsd:string ;
+    rdfs:label "discoveryQuery" ;
+    rdfs:comment "The natural language query that reveals this secret via graph traversal." .
+
+rev:secretContent a owl:DatatypeProperty ;
+    rdfs:domain rev:SecretFact ;
+    rdfs:range xsd:string ;
+    rdfs:label "secretContent" .

@@ -1,0 +1,181 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   Revenant Design System — globals.css
+   "Ancient tome meets arcane interface"
+   ============================================================ */
+
+@layer base {
+  :root {
+    /* Color tokens */
+    --color-base:    #080B14;
+    --color-surface: #0F1420;
+    --color-border:  #1E2940;
+    --color-accent:  #7C3AED;
+    --color-accent2: #F59E0B;
+    --color-danger:  #EF4444;
+    --color-rumor:   #F97316;
+    --color-text:    #E2E8F0;
+    --color-muted:   #64748B;
+
+    /* Font tokens */
+    --font-display: var(--font-display, 'Cinzel', serif);
+    --font-body:    var(--font-body, 'Inter', sans-serif);
+    --font-mono:    var(--font-mono, 'JetBrains Mono', monospace);
+  }
+
+  * {
+    box-sizing: border-box;
+    border-color: var(--color-border);
+  }
+
+  html, body {
+    background-color: var(--color-base);
+    color: var(--color-text);
+    font-family: var(--font-body);
+    height: 100%;
+    overflow: hidden;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-accent);
+  }
+
+  /* Selection */
+  ::selection {
+    background-color: rgba(124, 58, 237, 0.35);
+    color: var(--color-text);
+  }
+}
+
+/* ============================================================
+   Utility classes via @layer utilities
+   ============================================================ */
+@layer utilities {
+  /* Color utilities */
+  .bg-base    { background-color: var(--color-base); }
+  .bg-surface { background-color: var(--color-surface); }
+  .border-border { border-color: var(--color-border); }
+  .text-text  { color: var(--color-text); }
+  .text-muted { color: var(--color-muted); }
+  .text-accent  { color: var(--color-accent); }
+  .text-accent2 { color: var(--color-accent2); }
+  .text-danger  { color: var(--color-danger); }
+  .text-rumor   { color: var(--color-rumor); }
+  .bg-accent  { background-color: var(--color-accent); }
+  .bg-accent2 { background-color: var(--color-accent2); }
+  .bg-danger  { background-color: var(--color-danger); }
+  .bg-rumor   { background-color: var(--color-rumor); }
+
+  /* Font utilities */
+  .font-display { font-family: var(--font-display); }
+  .font-body    { font-family: var(--font-body); }
+  .font-mono    { font-family: var(--font-mono); }
+}
+
+/* ============================================================
+   Animations
+   ============================================================ */
+
+@keyframes rumor-pulse {
+  0%, 100% { opacity: 1; stroke-dashoffset: 0; }
+  50%       { opacity: 0.5; stroke-dashoffset: 8; }
+}
+
+@keyframes node-dissolve {
+  from { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(0.5); }
+}
+
+@keyframes trust-glow-green {
+  0%, 100% { box-shadow: 0 0 8px rgba(34, 197, 94, 0.4); }
+  50%       { box-shadow: 0 0 18px rgba(34, 197, 94, 0.8); }
+}
+
+@keyframes trust-glow-red {
+  0%, 100% { box-shadow: 0 0 8px rgba(239, 68, 68, 0.4); }
+  50%       { box-shadow: 0 0 18px rgba(239, 68, 68, 0.8); }
+}
+
+@keyframes slide-up {
+  from { transform: translateY(8px); opacity: 0; }
+  to   { transform: translateY(0);   opacity: 1; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+
+/* Utility animation classes */
+.animate-node-dissolve {
+  animation: node-dissolve 0.6s ease-out forwards;
+}
+.animate-slide-up {
+  animation: slide-up 0.2s ease-out both;
+}
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out both;
+}
+
+/* Shimmer loading effect */
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface) 25%,
+    var(--color-border) 50%,
+    var(--color-surface) 75%
+  );
+  background-size: 200% auto;
+  animation: shimmer 1.5s infinite linear;
+}
+
+/* ============================================================
+   Glassmorphism card
+   ============================================================ */
+.glass-card {
+  background: rgba(15, 20, 32, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(30, 41, 64, 0.8);
+}
+
+/* ============================================================
+   Arcane header glow
+   ============================================================ */
+.header-glow {
+  text-shadow: 0 0 20px rgba(124, 58, 237, 0.5), 0 0 40px rgba(124, 58, 237, 0.2);
+}
+
+/* ============================================================
+   Trust bar transitions
+   ============================================================ */
+.trust-bar-fill {
+  transition: width 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* ============================================================
+   Bounce animation delays for typing indicator
+   ============================================================ */
+.delay-75  { animation-delay: 75ms; }
+.delay-150 { animation-delay: 150ms; }
+.delay-300 { animation-delay: 300ms; }
