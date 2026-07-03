@@ -1,18 +1,6 @@
 """
 cognee_client.py — Single source of truth for ALL Cognee Cloud REST calls.
 Shapes verified against /openapi.json on tenant instance.
-
-Endpoint corrections vs original assumptions:
-  - recall()        → returns list[ResultItem], not dict
-  - remember_entry()→ {"entry": {...}, "dataset_name": str, "session_id": str}
-  - QAEntry         → {type, question, answer, context}
-  - TraceEntry      → {type, origin_function, status, memory_query, memory_context}
-  - FeedbackEntry   → {type, qa_id, feedback_text, feedback_score}
-  - SkillRunEntry   → {type, run_id, selected_skill_id, task_text, result_summary}
-  - graph           → GET /api/v1/datasets/{uuid}/graph  (needs real UUID)
-  - forget          → POST /api/v1/forget {dataset, dataId?}
-  - add content     → POST /api/v1/add_text {text_data: [...], datasetName}
-  - process graph   → POST /api/v1/cognify {datasets: [name]}
 """
 from __future__ import annotations
 
@@ -40,22 +28,16 @@ HEADERS = {
     "Content-Type": "application/json",
 }
 
-# Timeout config (seconds)
 _SHORT = 30.0
-_RECALL = 45.0
+_RECALL = 60.0
 _COGNIFY = 120.0
 
 
 class CogneeClient:
-    """Async Cognee Cloud REST client — all shapes verified from /openapi.json."""
 
-    # ------------------------------------------------------------------
-    # Dataset UUID cache (name → UUID)
-    # ------------------------------------------------------------------
     _dataset_uuid_cache: dict[str, str] = {}
 
     async def _get_dataset_uuid(self, dataset_name: str) -> Optional[str]:
-        """Resolve dataset name → UUID for graph endpoint."""
         if dataset_name in self._dataset_uuid_cache:
             return self._dataset_uuid_cache[dataset_name]
         try:
@@ -80,19 +62,13 @@ class CogneeClient:
         return None
 
     # ------------------------------------------------------------------
-    # World init — add_text + cognify to build initial graph
+    # World init
     # ------------------------------------------------------------------
 
     async def init_dataset(self, dataset_name: str, seed_texts: list[str]) -> dict:
-        """
-        POST /api/v1/add_text — ingest NPC backstory text into the dataset.
-        POST /api/v1/cognify  — build knowledge graph from ingested text.
-        Called once on world init to seed the graph with NPC knowledge.
-        """
         logger.info(f"Seeding dataset '{dataset_name}' with {len(seed_texts)} texts")
         result = {}
         async with httpx.AsyncClient(follow_redirects=True) as c:
-            # Add text
             r = await c.post(
                 f"{COGNEE_BASE}/api/v1/add_text",
                 headers=HEADERS,
@@ -102,7 +78,6 @@ class CogneeClient:
             self._log_response("add_text", r)
             result["add"] = r.json() if r.content else {}
 
-            # Cognify — build knowledge graph
             r2 = await c.post(
                 f"{COGNEE_BASE}/api/v1/cognify",
                 headers=HEADERS,
@@ -115,7 +90,7 @@ class CogneeClient:
         return result
 
     # ------------------------------------------------------------------
-    # remember/entry — typed memory writes (4 types)
+    # Typed memory entries
     # ------------------------------------------------------------------
 
     async def remember_qa(
@@ -126,10 +101,6 @@ class CogneeClient:
         session_id: str,
         context: str = "",
     ) -> str:
-        """
-        POST /api/v1/remember/entry — QAEntry
-        Stores a dialogue exchange. Returns entry_id for chaining feedback.
-        """
         payload = {
             "entry": {
                 "type": "qa",
@@ -152,10 +123,6 @@ class CogneeClient:
         session_id: str,
         status: str = "success",
     ) -> str:
-        """
-        POST /api/v1/remember/entry — TraceEntry
-        Records NPC reasoning + which memory nodes were used for this turn.
-        """
         payload = {
             "entry": {
                 "type": "trace",
@@ -178,10 +145,6 @@ class CogneeClient:
         dataset_name: str,
         session_id: str,
     ) -> dict:
-        """
-        POST /api/v1/remember/entry — FeedbackEntry (bi-temporal trust update)
-        Chained to an existing qa_id — the trust delta is the feedback_score.
-        """
         payload = {
             "entry": {
                 "type": "feedback",
@@ -204,10 +167,6 @@ class CogneeClient:
         session_id: Optional[str] = None,
         success_score: float = 1.0,
     ) -> dict:
-        """
-        POST /api/v1/remember/entry — SkillRunEntry
-        Records NPC actions and rumor seeds. No session required.
-        """
         payload: dict = {
             "entry": {
                 "type": "skill_run",
@@ -240,7 +199,7 @@ class CogneeClient:
         return {}
 
     # ------------------------------------------------------------------
-    # recall — multi-hop graph retrieval
+    # recall — always CHUNKS (vector similarity, no internal LLM needed)
     # ------------------------------------------------------------------
 
     async def recall(
@@ -248,13 +207,17 @@ class CogneeClient:
         query: str,
         dataset_name: str,
         session_id: Optional[str] = None,
-        graph_traversal: bool = True,
+        graph_traversal: bool = True,  # param kept for API compat, ignored
     ) -> RecallResult:
         """
-        POST /api/v1/recall
-        # Always use CHUNKS — reliable, fast, no internal LLM dependency.
-        # GRAPH_COMPLETION requires Cognee's LLM to be configured on the tenant.
-        # We handle enrichment ourselves via Gemini.
+        POST /api/v1/recall with search_type=CHUNKS.
+
+        Why CHUNKS and not GRAPH_COMPLETION:
+          GRAPH_COMPLETION requires the Cognee tenant to have an LLM configured.
+          If no LLM is set, Cognee returns HTTP 200 with an error body:
+            {"error": "model output must contain either output text or tool calls..."}
+          This silently produces empty context and breaks dialogue.
+          CHUNKS uses pure vector similarity — always works, no LLM dependency.
         """
         search_type = "CHUNKS"
 
@@ -267,22 +230,31 @@ class CogneeClient:
         if session_id:
             payload["session_id"] = session_id
 
-        logger.info(f"recall() query='{query[:60]}...' datasets={[dataset_name]} search={search_type}")
-        async with httpx.AsyncClient(follow_redirects=True) as c:
-            r = await c.post(
-                f"{COGNEE_BASE}/api/v1/recall",
-                headers=HEADERS,
-                json=payload,
-                timeout=_RECALL,
-            )
-        self._log_response("recall", r)
+        logger.info(f"recall() query='{query[:60]}' search={search_type}")
 
-        if not r.content:
+        try:
+            async with httpx.AsyncClient(follow_redirects=True) as c:
+                r = await c.post(
+                    f"{COGNEE_BASE}/api/v1/recall",
+                    headers=HEADERS,
+                    json=payload,
+                    timeout=_RECALL,
+                )
+            self._log_response("recall", r)
+            if r.status_code >= 400:
+                logger.error(f"Cognee recall HTTP {r.status_code}: {r.text[:300]}")
+                return RecallResult()
+            return self._parse_recall_response(r, search_type)
+
+        except Exception as e:
+            logger.error(f"recall() exception: {e}")
             return RecallResult()
 
+    def _parse_recall_response(self, r: httpx.Response, search_type: str) -> RecallResult:
+        if not r.content:
+            return RecallResult()
         data = r.json()
 
-        # Cognee recall returns a list of result items
         if isinstance(data, list):
             items = data
         elif isinstance(data, dict):
@@ -290,38 +262,58 @@ class CogneeClient:
         else:
             items = []
 
-        # Build graph context from text fields
         texts = [
             item.get("text", item.get("raw", {}).get("value", ""))
             for item in items
             if isinstance(item, dict)
         ]
         graph_context = "\n\n".join(t for t in texts if t)
+        citations = self._extract_citations(items, search_type)
 
-        citations = self._extract_citations(items)
         return RecallResult(
             nodes=items,
             graph_context=graph_context,
             citations=citations,
         )
 
-    def _extract_citations(self, items: list) -> list[CitationEntry]:
-        """Build citation log entries from recall result items."""
+    def _extract_citations(self, items: list, search_type: str = "chunk") -> list[CitationEntry]:
+        """
+        FIX: Each citation now gets a unique document_id.
+        Uses chunk_id → id → content-hash fallback to prevent all-same-ID bug.
+        """
         citations: list[CitationEntry] = []
-        for item in items[:5]:
+        seen: set[str] = set()
+
+        for i, item in enumerate(items[:5]):
             if not isinstance(item, dict):
                 continue
+
             text = item.get("text", item.get("raw", {}).get("value", ""))
+
+            # Try every possible unique ID field
             doc_id = (
-                item.get("document_id")
+                item.get("chunk_id")
+                or item.get("document_id")
                 or item.get("data_id")
-                or item.get("dataset_id", "")
-                or "graph_node"
+                or item.get("id")
+                or item.get("node_id")
             )
+
+            # Unique fallback: position + content hash (never collides)
+            if not doc_id or doc_id in seen:
+                content_hash = abs(hash(str(text)[:50])) % 99999
+                doc_id = f"{search_type}_{i}_{content_hash:05d}"
+
+            # Still collides? append index
+            if doc_id in seen:
+                doc_id = f"{doc_id}_{i}"
+
+            seen.add(str(doc_id))
+
             citations.append(
                 CitationEntry(
-                    document_id=str(doc_id),
-                    type=item.get("kind", item.get("search_type", "graph_completion")),
+                    document_id=str(doc_id)[:40],
+                    type=item.get("kind", item.get("search_type", search_type)),
                     timestamp=str(item.get("metadata", {}).get("timestamp", "")),
                     content_preview=str(text)[:100],
                     score=float(item.get("score") or 0.0),
@@ -330,15 +322,10 @@ class CogneeClient:
         return citations
 
     # ------------------------------------------------------------------
-    # cognify — THE RUMOR MILL (build/enrich knowledge graph)
+    # improve — THE RUMOR MILL
     # ------------------------------------------------------------------
 
     async def improve(self, dataset_name: str) -> dict:
-        """
-        POST /api/v1/cognify  — triggers post-ingestion graph enrichment.
-        THE RUMOR MILL. Called via asyncio.create_task() — fire-and-forget.
-        Creates cross-NPC edges from structured rumor seed text.
-        """
         logger.info(f"Invoking cognify (rumor mill) for dataset: {dataset_name}")
         async with httpx.AsyncClient(follow_redirects=True) as c:
             r = await c.post(
@@ -355,10 +342,6 @@ class CogneeClient:
     # ------------------------------------------------------------------
 
     async def forget_document(self, dataset_name: str, data_id: str) -> dict:
-        """
-        POST /api/v1/forget — surgical forget by data_id within a dataset.
-        Severs only the targeted memory node. Does NOT nuke entire dataset.
-        """
         logger.info(f"forget_document() dataset={dataset_name} data_id={data_id}")
         async with httpx.AsyncClient(follow_redirects=True) as c:
             r = await c.post(
@@ -371,14 +354,10 @@ class CogneeClient:
         return r.json() if r.content else {"status": "forgotten"}
 
     # ------------------------------------------------------------------
-    # graph — live visualization
+    # graph
     # ------------------------------------------------------------------
 
     async def get_graph(self, dataset_name: str) -> GraphData:
-        """
-        GET /api/v1/datasets/{uuid}/graph — returns nodes + edges for visualization.
-        Resolves dataset name → UUID first.
-        """
         logger.info(f"get_graph() dataset={dataset_name}")
         uid = await self._get_dataset_uuid(dataset_name)
         if not uid:
@@ -405,15 +384,15 @@ class CogneeClient:
         return GraphData()
 
     # ------------------------------------------------------------------
-    # list documents for Amnesia Modal
+    # list documents (kept for graph display, NOT used for amnesia)
     # ------------------------------------------------------------------
 
     async def list_documents(self, dataset_name: str, npc_id: str) -> list[dict]:
         """
-        GET /api/v1/datasets/{uuid}/data — list data items for a dataset.
-        Filtered to items belonging to this NPC.
+        NOTE: This is NOT used for the amnesia modal anymore.
+        Amnesia modal uses world_state.get_npc_memories() registry instead.
+        This is kept for potential graph-level document inspection.
         """
-        logger.info(f"list_documents() dataset={dataset_name} npc={npc_id}")
         uid = await self._get_dataset_uuid(dataset_name)
         if not uid:
             return []
@@ -443,12 +422,9 @@ class CogneeClient:
 
     def _log_response(self, method: str, resp: httpx.Response) -> None:
         if resp.status_code >= 400:
-            logger.error(
-                f"Cognee {method} HTTP {resp.status_code}: {resp.text[:300]}"
-            )
+            logger.error(f"Cognee {method} HTTP {resp.status_code}: {resp.text[:300]}")
         else:
             logger.debug(f"Cognee {method} HTTP {resp.status_code}")
 
 
-# Singleton instance — import this everywhere
 cognee = CogneeClient()

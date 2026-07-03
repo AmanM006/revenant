@@ -234,7 +234,7 @@ RULES:
     # Push this turn to conversation history immediately after response
     push_conversation_turn(world_id, npc_id, player_message, response_text)
 
-# ----------------------------------------------------------------
+    # ----------------------------------------------------------------
     # STEP 5: remember() all 4 typed entries + register for amnesia
     # ----------------------------------------------------------------
     ts = int(time.time())
