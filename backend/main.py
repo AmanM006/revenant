@@ -271,6 +271,7 @@ async def rumor_mill(body: RumorMillRequest) -> RumorMillResponse:
             world_id=body.world_id,
             triggered_by="player_manual",
             ws_manager=ws_manager,
+            manual=True,
         )
         return RumorMillResponse(**result)
     except Exception as e:

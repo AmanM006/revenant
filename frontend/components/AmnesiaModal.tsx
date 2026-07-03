@@ -9,7 +9,6 @@ interface Props {
   isOpen: boolean;
   npcId: NpcId;
   npcName: string;
-  worldId: string;
   gold: number;
   onClose: () => void;
   onSuccess: (documentId: string, goldRemaining: number) => void;
@@ -37,7 +36,6 @@ export function AmnesiaModal({
   isOpen,
   npcId,
   npcName,
-  worldId,
   gold,
   onClose,
   onSuccess,
@@ -58,7 +56,7 @@ export function AmnesiaModal({
       return;
     }
     setLoading(true);
-    listMemories(npcId, worldId)
+    listMemories(npcId)
       .then((d) => {
         setDocs(d);
         setLoading(false);
@@ -67,7 +65,7 @@ export function AmnesiaModal({
         setError(e.message);
         setLoading(false);
       });
-  }, [isOpen, npcId, worldId]);
+  }, [isOpen, npcId]);
 
   async function handleCast() {
     if (!selected) return;
@@ -78,7 +76,7 @@ export function AmnesiaModal({
     setCasting(selected);
     setError(null);
     try {
-      const result = await forgetMemory(npcId, selected, worldId);
+      const result = await forgetMemory(npcId, selected);
       setSuccess(result.message);
       onSuccess(selected, result.gold_remaining);
       setDocs((prev) => prev.filter((d) => d.document_id !== selected));

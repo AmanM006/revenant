@@ -2,7 +2,6 @@
 // components/EngineControls.tsx — 3 engine action buttons at the bottom of the layout
 
 interface Props {
-  worldId: string;
   gold: number;
   rumorLoading: boolean;
   onTriggerRumorMill: () => void;

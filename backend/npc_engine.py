@@ -405,6 +405,14 @@ async def process_action(
                 dataset_name=dataset_name,
                 session_id=session_id,
             )
+        if delta < -15:
+            register_memory(
+                world_id, npc_id,
+                doc_id=f"feedback_{npc_id}_{action_type}_{ts}",
+                description=f"{npc.name} remembers you {action_type}d them (trust: {trust}→{new_trust}, Day {game_day})",
+                entry_type="feedback",
+                game_day=game_day,
+            )
     except Exception as e:
         logger.warning(f"action remember failed: {e}")
 
@@ -489,6 +497,7 @@ async def cast_amnesia(
     remaining_gold = deduct_gold(world_id, 50)
 
     result = await cognee.forget_document(dataset_name, document_id)
+    remove_memory(world_id, npc_id, document_id)
 
     try:
         await cognee.remember_trace(

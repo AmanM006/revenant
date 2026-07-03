@@ -5,11 +5,14 @@ No database — all state lives here for the lifetime of the server process.
 """
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Optional
 
 from backend.schemas import TrustHistoryEntry
+
+logger = logging.getLogger("revenant.world_state")
 
 
 # ---------------------------------------------------------------------------

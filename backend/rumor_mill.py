@@ -24,6 +24,7 @@ async def trigger_rumor_mill(
     world_id: str,
     triggered_by: str,
     ws_manager=None,
+    manual: bool = False,
 ) -> dict:
     """
     THE CORE DIFFERENTIATOR.
@@ -54,55 +55,64 @@ async def trigger_rumor_mill(
     for source_npc_id, source_npc in NPC_DEFINITIONS.items():
         trust = npc_trust_states[source_npc_id]
 
-        if trust < 40:  # Low trust = NPC actively warns others
-            targets = [n for n in NPC_DEFINITIONS if n != source_npc_id]
+        # FIX: manual=True bypasses trust threshold (was < 40, misses most games)
+        # manual=False (auto every 3 turns): only inject when trust < 60
+        should_propagate = manual or trust < 60
+        if not should_propagate:
+            logger.info(
+                f"Skipping rumor from {source_npc_id} "
+                f"(trust={trust}/100, auto-trigger only fires when < 60)"
+            )
+            continue
 
-            for target_npc_id in targets:
-                target_npc = NPC_DEFINITIONS[target_npc_id]
-                doc_id = f"rumor_{source_npc_id}_to_{target_npc_id}_{ts}"
+        targets = [n for n in NPC_DEFINITIONS if n != source_npc_id]
 
-                content = (
-                    f"RUMOR_PROPAGATION event on game day {game_day}. "
-                    f"Source NPC: {source_npc.name} (npc_id={source_npc_id}). "
-                    f"Target NPC: {target_npc.name} (npc_id={target_npc_id}). "
-                    f"Rumor content: Player has damaged trust with {source_npc.name} "
-                    f"(trust score={trust}/100, below warning threshold of 40). "
-                    f"{source_npc.name} warns {target_npc.name} to be suspicious of the player. "
-                    f"Propagation type: {source_npc.rumor_behavior}. "
-                    f"Rumor propagation method: improve() graph enrichment pipeline. "
-                    f"Suggested trust adjustment for {target_npc_id}: -15."
+        for target_npc_id in targets:
+            target_npc = NPC_DEFINITIONS[target_npc_id]
+            doc_id = f"rumor_{source_npc_id}_to_{target_npc_id}_{ts}"
+
+            content = (
+                f"RUMOR_PROPAGATION event on game day {game_day}. "
+                f"Source NPC: {source_npc.name} (npc_id={source_npc_id}). "
+                f"Target NPC: {target_npc.name} (npc_id={target_npc_id}). "
+                f"Rumor content: Player has damaged trust with {source_npc.name} "
+                f"(trust score={trust}/100, below warning threshold of 60). "
+                f"{source_npc.name} warns {target_npc.name} to be suspicious of the player. "
+                f"Propagation type: {source_npc.rumor_behavior}. "
+                f"Rumor propagation method: improve() graph enrichment pipeline. "
+                f"Suggested trust adjustment for {target_npc_id}: -15."
+            )
+
+            try:
+                await cognee.remember_skill_run(
+                    run_id=doc_id,
+                    skill_id="rumor_propagation",
+                    task_text=(
+                        f"{source_npc.name} warns {target_npc.name} about the player. "
+                        f"Trust score={trust}/100, below warning threshold."
+                    ),
+                    result_summary=content,
+                    dataset_name=dataset_name,
+                    success_score=1.0,
                 )
+                rumors_injected += 1
+                logger.info(
+                    f"Rumor seed injected: {source_npc_id} → {target_npc_id} (doc={doc_id})"
+                )
+            except Exception as e:
+                logger.error(f"Failed to inject rumor seed {doc_id}: {e}")
 
-                try:
-                    await cognee.remember_skill_run(
-                        run_id=doc_id,
-                        skill_id="rumor_propagation",
-                        task_text=(
-                            f"{source_npc.name} warns {target_npc.name} about the player. "
-                            f"Trust score={trust}/100, below warning threshold."
-                        ),
-                        result_summary=content,
-                        dataset_name=dataset_name,
-                        success_score=1.0,
-                    )
-                    rumors_injected += 1
-                    logger.info(
-                        f"Rumor seed injected: {source_npc_id} → {target_npc_id} (doc={doc_id})"
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to inject rumor seed {doc_id}: {e}")
-
-                # Notify frontend: rumor injected, show orange edge animating
-                if ws_manager:
-                    await ws_manager.broadcast(
-                        world_id,
-                        {
-                            "type": "rumor_injected",
-                            "from": source_npc_id,
-                            "to": target_npc_id,
-                            "label": f"{source_npc.name} warns {target_npc.name}",
-                        },
-                    )
+            # Notify frontend: rumor injected, show orange edge animating
+            if ws_manager:
+                await ws_manager.broadcast(
+                    world_id,
+                    {
+                        "type": "rumor_injected",
+                        "from": source_npc_id,
+                        "to": target_npc_id,
+                        "label": f"{source_npc.name} warns {target_npc.name}",
+                    },
+                )
 
     # ----------------------------------------------------------------
     # PHASE 2: Fire-and-forget improve() — heavy Cognee Cloud pipeline
@@ -119,7 +129,8 @@ async def trigger_rumor_mill(
     # Trust updated now so UI reflects it without waiting for improve().
     # ----------------------------------------------------------------
     for source_npc_id in NPC_DEFINITIONS:
-        if npc_trust_states[source_npc_id] < 40:
+        trust = npc_trust_states[source_npc_id]
+        if manual or trust < 60:
             for target_npc_id in NPC_DEFINITIONS:
                 if target_npc_id != source_npc_id:
                     new_trust = update_trust(

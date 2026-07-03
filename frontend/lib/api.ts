@@ -16,6 +16,23 @@ import type {
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 // ---------------------------------------------------------------------------
+// Per-session world isolation
+// Each browser tab gets a unique world_id stored in sessionStorage.
+// This prevents multiple judges/testers from contaminating each other's state.
+// ---------------------------------------------------------------------------
+
+function getWorldId(): string {
+  if (typeof window === "undefined") return "ashenvale_ssr";
+  const stored = sessionStorage.getItem("revenant_world_id");
+  if (stored) return stored;
+  const id = `ashenvale_${Date.now().toString(36)}`;
+  sessionStorage.setItem("revenant_world_id", id);
+  return id;
+}
+
+export { getWorldId };
+
+// ---------------------------------------------------------------------------
 // Internal fetch helper — always logs errors, never throws silently
 // ---------------------------------------------------------------------------
 
@@ -48,16 +65,16 @@ async function apiFetch<T>(
 // World
 // ---------------------------------------------------------------------------
 
-export async function initWorld(worldName: string) {
+export async function initWorld() {
   return apiFetch<{ world_id: string; dataset_id: string; status: string; npcs_seeded: string[] }>(
     "POST",
     "/world/init",
-    { world_name: worldName }
+    { world_name: getWorldId() }
   );
 }
 
-export async function getWorldState(worldId: string): Promise<WorldStateSnapshot> {
-  return apiFetch<WorldStateSnapshot>("GET", `/world/${worldId}/state`);
+export async function getWorldState(): Promise<WorldStateSnapshot> {
+  return apiFetch<WorldStateSnapshot>("GET", `/world/${getWorldId()}/state`);
 }
 
 // ---------------------------------------------------------------------------
@@ -66,13 +83,12 @@ export async function getWorldState(worldId: string): Promise<WorldStateSnapshot
 
 export async function sendDialogue(
   npcId: NpcId,
-  message: string,
-  worldId: string
+  message: string
 ): Promise<DialogueResponse> {
   return apiFetch<DialogueResponse>("POST", "/dialogue", {
     npc_id: npcId,
     message,
-    world_id: worldId,
+    world_id: getWorldId(),
   });
 }
 
@@ -82,13 +98,12 @@ export async function sendDialogue(
 
 export async function sendAction(
   npcId: NpcId,
-  actionType: ActionType,
-  worldId: string
+  actionType: ActionType
 ): Promise<ActionResponse> {
   return apiFetch<ActionResponse>("POST", "/action", {
     npc_id: npcId,
     action_type: actionType,
-    world_id: worldId,
+    world_id: getWorldId(),
   });
 }
 
@@ -96,30 +111,29 @@ export async function sendAction(
 // Rumor Mill
 // ---------------------------------------------------------------------------
 
-export async function triggerRumorMill(worldId: string): Promise<RumorMillResponse> {
-  return apiFetch<RumorMillResponse>("POST", "/rumor-mill", { world_id: worldId });
+export async function triggerRumorMill(): Promise<RumorMillResponse> {
+  return apiFetch<RumorMillResponse>("POST", "/rumor-mill", { world_id: getWorldId() });
 }
 
 // ---------------------------------------------------------------------------
 // Memories / Amnesia
 // ---------------------------------------------------------------------------
 
-export async function listMemories(npcId: NpcId, worldId: string): Promise<MemoryDocument[]> {
+export async function listMemories(npcId: NpcId): Promise<MemoryDocument[]> {
   return apiFetch<MemoryDocument[]>("GET", `/memories/${npcId}`, undefined, {
-    world_id: worldId,
+    world_id: getWorldId(),
   });
 }
 
 export async function forgetMemory(
   npcId: NpcId,
-  documentId: string,
-  worldId: string
+  documentId: string
 ): Promise<AmnesiaResponse> {
   return apiFetch<AmnesiaResponse>(
     "DELETE",
     `/memories/${npcId}/${encodeURIComponent(documentId)}`,
     undefined,
-    { world_id: worldId }
+    { world_id: getWorldId() }
   );
 }
 
@@ -127,8 +141,8 @@ export async function forgetMemory(
 // Trust timeline
 // ---------------------------------------------------------------------------
 
-export async function getTrustTimeline(npcId: NpcId, worldId: string): Promise<TrustResponse> {
-  return apiFetch<TrustResponse>("GET", `/trust/${npcId}`, undefined, { world_id: worldId });
+export async function getTrustTimeline(npcId: NpcId): Promise<TrustResponse> {
+  return apiFetch<TrustResponse>("GET", `/trust/${npcId}`, undefined, { world_id: getWorldId() });
 }
 
 // ---------------------------------------------------------------------------
@@ -136,18 +150,17 @@ export async function getTrustTimeline(npcId: NpcId, worldId: string): Promise<T
 // ---------------------------------------------------------------------------
 
 export async function timeSkip(
-  worldId: string,
   days = 1
 ): Promise<{ game_day: number; rumor_mill_triggered: boolean; gold: number }> {
-  return apiFetch("POST", "/time-skip", { world_id: worldId, days });
+  return apiFetch("POST", "/time-skip", { world_id: getWorldId(), days });
 }
 
 // ---------------------------------------------------------------------------
 // Graph
 // ---------------------------------------------------------------------------
 
-export async function getGraph(worldId: string): Promise<GraphData> {
-  return apiFetch<GraphData>("GET", `/graph/${worldId}`);
+export async function getGraph(): Promise<GraphData> {
+  return apiFetch<GraphData>("GET", `/graph/${getWorldId()}`);
 }
 
 export async function checkHealth(): Promise<{ status: string }> {

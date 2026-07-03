@@ -199,7 +199,7 @@ class CogneeClient:
         return {}
 
     # ------------------------------------------------------------------
-    # recall — always CHUNKS (vector similarity, no internal LLM needed)
+    # recall — GRAPH_COMPLETION with CHUNKS fallback
     # ------------------------------------------------------------------
 
     async def recall(
@@ -207,30 +207,20 @@ class CogneeClient:
         query: str,
         dataset_name: str,
         session_id: Optional[str] = None,
-        graph_traversal: bool = True,  # param kept for API compat, ignored
+        graph_traversal: bool = True,
     ) -> RecallResult:
-        """
-        POST /api/v1/recall with search_type=CHUNKS.
-
-        Why CHUNKS and not GRAPH_COMPLETION:
-          GRAPH_COMPLETION requires the Cognee tenant to have an LLM configured.
-          If no LLM is set, Cognee returns HTTP 200 with an error body:
-            {"error": "model output must contain either output text or tool calls..."}
-          This silently produces empty context and breaks dialogue.
-          CHUNKS uses pure vector similarity — always works, no LLM dependency.
-        """
-        search_type = "CHUNKS"
+        primary_type = "GRAPH_COMPLETION" if graph_traversal else "CHUNKS"
 
         payload: dict = {
             "query": query,
-            "search_type": search_type,
+            "search_type": primary_type,
             "datasets": [dataset_name],
             "top_k": 10,
         }
         if session_id:
             payload["session_id"] = session_id
 
-        logger.info(f"recall() query='{query[:60]}' search={search_type}")
+        logger.info(f"recall() query='{query[:60]}' search={primary_type}")
 
         try:
             async with httpx.AsyncClient(follow_redirects=True) as c:
@@ -240,14 +230,28 @@ class CogneeClient:
                     json=payload,
                     timeout=_RECALL,
                 )
-            self._log_response("recall", r)
             if r.status_code >= 400:
-                logger.error(f"Cognee recall HTTP {r.status_code}: {r.text[:300]}")
-                return RecallResult()
-            return self._parse_recall_response(r, search_type)
+                raise ValueError(f"{primary_type} HTTP {r.status_code}: {r.text[:200]}")
+            self._log_response(f"recall/{primary_type}", r)
+            return self._parse_recall_response(r, primary_type)
 
         except Exception as e:
-            logger.error(f"recall() exception: {e}")
+            if graph_traversal:
+                logger.warning(f"GRAPH_COMPLETION failed ({e}), falling back to CHUNKS")
+                payload["search_type"] = "CHUNKS"
+                try:
+                    async with httpx.AsyncClient(follow_redirects=True) as c:
+                        r2 = await c.post(
+                            f"{COGNEE_BASE}/api/v1/recall",
+                            headers=HEADERS,
+                            json=payload,
+                            timeout=_RECALL,
+                        )
+                    self._log_response("recall/CHUNKS_fallback", r2)
+                    return self._parse_recall_response(r2, "CHUNKS")
+                except Exception as e2:
+                    logger.error(f"CHUNKS fallback also failed: {e2}")
+                    return RecallResult()
             return RecallResult()
 
     def _parse_recall_response(self, r: httpx.Response, search_type: str) -> RecallResult:
@@ -277,10 +281,6 @@ class CogneeClient:
         )
 
     def _extract_citations(self, items: list, search_type: str = "chunk") -> list[CitationEntry]:
-        """
-        FIX: Each citation now gets a unique document_id.
-        Uses chunk_id → id → content-hash fallback to prevent all-same-ID bug.
-        """
         citations: list[CitationEntry] = []
         seen: set[str] = set()
 
@@ -290,7 +290,6 @@ class CogneeClient:
 
             text = item.get("text", item.get("raw", {}).get("value", ""))
 
-            # Try every possible unique ID field
             doc_id = (
                 item.get("chunk_id")
                 or item.get("document_id")
@@ -299,13 +298,11 @@ class CogneeClient:
                 or item.get("node_id")
             )
 
-            # Unique fallback: position + content hash (never collides)
-            if not doc_id or doc_id in seen:
+            if not doc_id or str(doc_id) in seen:
                 content_hash = abs(hash(str(text)[:50])) % 99999
                 doc_id = f"{search_type}_{i}_{content_hash:05d}"
 
-            # Still collides? append index
-            if doc_id in seen:
+            if str(doc_id) in seen:
                 doc_id = f"{doc_id}_{i}"
 
             seen.add(str(doc_id))

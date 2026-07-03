@@ -1,4 +1,4 @@
-"use client";
+                                                                                                                              "use client";
 // app/page.tsx — Full 3-panel Revenant layout
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -9,7 +9,7 @@ import {
   initWorld,
   sendDialogue,
   timeSkip,
-  triggerRumorMill,
+  triggerRumorMill,                                               
 } from "@/lib/api";
 import { useGameSocket } from "@/lib/useGameSocket";
 import { AmnesiaModal } from "@/components/AmnesiaModal";
@@ -26,7 +26,7 @@ import type {
   TrustHistoryEntry,
 } from "@/lib/types";
 
-const WORLD_NAME = "ashenvale";
+
 
 const NPC_NAMES: Record<NpcId, string> = {
   silas: "Silas",
@@ -95,11 +95,11 @@ export default function Home() {
     async function init() {
       setInitStatus("initializing");
       try {
-        const result = await initWorld(WORLD_NAME);
+        const result = await initWorld();
         setWorldId(result.world_id);
 
         // Fetch initial state
-        const state = await getWorldState(result.world_id);
+        const state = await getWorldState();
         setGameDay(state.game_day);
         setGold(state.gold);
         setTrust(state.trust as Record<NpcId, number>);
@@ -109,12 +109,12 @@ export default function Home() {
 
         // Fetch initial trust histories
         for (const npcId of ["silas", "elara", "kael"] as NpcId[]) {
-          const tl = await getTrustTimeline(npcId, result.world_id);
+          const tl = await getTrustTimeline(npcId);
           setHistories((prev) => ({ ...prev, [npcId]: tl.history }));
         }
 
         // Fetch initial graph
-        const graph = await getGraph(result.world_id);
+        const graph = await getGraph();
         setGraphData(graph);
 
         setInitStatus("ready");
@@ -153,7 +153,7 @@ export default function Home() {
   const handleTrustUpdate = useCallback(async (npcId: NpcId, score: number) => {
     setTrust((prev) => ({ ...prev, [npcId]: score }));
     if (worldId) {
-      const tl = await getTrustTimeline(npcId, worldId);
+      const tl = await getTrustTimeline(npcId);
       setHistories((prev) => ({ ...prev, [npcId]: tl.history }));
       setTrajectories((prev) => ({ ...prev, [npcId]: tl.trajectory }));
     }
@@ -195,7 +195,7 @@ export default function Home() {
     setIsThinking(true);
 
     try {
-      const result = await sendDialogue(selectedNpc, message, worldId);
+      const result = await sendDialogue(selectedNpc, message);
 
       const npcMsg: ChatMessage = {
         id: `npc-${Date.now()}`,
@@ -215,7 +215,7 @@ export default function Home() {
       setTrust((prev) => ({ ...prev, [selectedNpc]: result.new_trust }));
 
       // Refresh history
-      const tl = await getTrustTimeline(selectedNpc, worldId);
+      const tl = await getTrustTimeline(selectedNpc);
       setHistories((prev) => ({ ...prev, [selectedNpc]: tl.history }));
       setTrajectories((prev) => ({ ...prev, [selectedNpc]: tl.trajectory }));
 
@@ -234,7 +234,7 @@ export default function Home() {
     if (!worldId || rumorLoading) return;
     setRumorLoading(true);
     try {
-      const result = await triggerRumorMill(worldId);
+      const result = await triggerRumorMill();
       showToast(`${result.message}`, "info");
     } catch (e: unknown) {
       showToast(`Rumor mill error: ${e instanceof Error ? e.message : String(e)}`, "error");
@@ -250,7 +250,7 @@ export default function Home() {
     if (!worldId || timeskipLoading) return;
     setTimeskipLoading(true);
     try {
-      const result = await timeSkip(worldId, 1);
+      const result = await timeSkip(1);
       setGameDay(result.game_day);
       setGold(result.gold);
       showToast(
@@ -401,7 +401,6 @@ export default function Home() {
       {/* ENGINE CONTROLS                                                     */}
       {/* ------------------------------------------------------------------ */}
       <EngineControls
-        worldId={worldId ?? ""}
         gold={gold}
         rumorLoading={rumorLoading}
         onTriggerRumorMill={handleRumorMill}
@@ -417,7 +416,6 @@ export default function Home() {
         isOpen={amnesiaOpen}
         npcId={selectedNpc}
         npcName={NPC_NAMES[selectedNpc]}
-        worldId={worldId ?? ""}
         gold={gold}
         onClose={() => setAmnesiaOpen(false)}
         onSuccess={handleAmnesiaSuccess}
