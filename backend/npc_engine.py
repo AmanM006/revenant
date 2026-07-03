@@ -24,6 +24,11 @@ from backend.world_state import (
     get_trust_trajectory,
     increment_turn,
     update_trust,
+    register_memory,
+    get_npc_memories,
+    remove_memory,
+    push_conversation_turn,
+    get_conversation_history,
 )
 
 logger = logging.getLogger("revenant.npc_engine")
@@ -171,6 +176,16 @@ async def process_dialogue(
             f"Use this to explain how you know what you know."
         )
 
+    # Load rolling conversation history (last 6 turns)
+    history = get_conversation_history(world_id, npc_id)
+    history_block = ""
+    if history:
+        lines = []
+        for turn in history:
+            lines.append(f"  Player: {turn['player']}")
+            lines.append(f"  {npc.name}: {turn['npc']}")
+        history_block = "RECENT CONVERSATION HISTORY (most recent last):\n" + "\n".join(lines)
+
     system_prompt = f"""You are {npc.name}, {npc.role} in the town of Ashenvale.
 
 PERSONALITY: {npc.personality}
@@ -184,12 +199,15 @@ MEMORY CONTEXT (from Cognee knowledge graph):
 {rumor_note}
 {provenance_note}
 
+{history_block}
+
 RULES:
 1. Respond in character. Reference specific past events from memory context when possible.
-2. Trust level MUST influence tone. Low trust = curt/suspicious. High trust = warm/helpful.
-3. If drawing on a rumor, reference your source: "I heard from [NPC name]..."
-4. Provenance query ("who told you?") → trace your source chain naturally in dialogue.
-5. Keep response under 120 words. Be sharp. No asterisks or stage directions."""
+2. IMPORTANT: The conversation history above shows what was said in THIS conversation — use it for context and continuity. If the player refers to something just said ("it", "that", "the blade", etc.), you know exactly what they mean.
+3. Trust level MUST influence tone. Low trust = curt/suspicious. High trust = warm/helpful.
+4. If drawing on a rumor, reference your source: "I heard from [NPC name]..."
+5. Provenance query ("who told you?") → trace your source chain naturally in dialogue.
+6. Keep response under 120 words. Be sharp. No asterisks or stage directions."""
 
     # ----------------------------------------------------------------
     # STEP 4: Generate NPC response via Gemini
@@ -213,73 +231,108 @@ RULES:
         trust_delta = 0
         action = "none"
 
-    # ----------------------------------------------------------------
-    # STEP 5: remember() all 4 typed entries
-    # ----------------------------------------------------------------
+    # Push this turn to conversation history immediately after response
+    push_conversation_turn(world_id, npc_id, player_message, response_text)
 
-    # qa: the dialogue turn itself — returns entry_id for chaining feedback
+# ----------------------------------------------------------------
+    # STEP 5: remember() all 4 typed entries + register for amnesia
+    # ----------------------------------------------------------------
+    ts = int(time.time())
+    game_day = get_game_day(world_id)
+
+    # qa: dialogue turn
+    qa_doc_id = f"qa_{npc_id}_{ts}"
     qa_entry_id = ""
     try:
         qa_entry_id = await cognee.remember_qa(
             question=player_message,
             answer=response_text,
-            context=(
-                f"NPC: {npc.name} | Trust: {trust}/100 | Day: {game_day} | Turn: {turn_count}"
-            ),
+            context=f"NPC: {npc.name} | Trust: {trust}/100 | Day: {game_day} | Turn: {turn_count}",
             dataset_name=dataset_name,
             session_id=session_id,
+        )
+        # FIX: Register for amnesia modal
+        register_memory(
+            world_id, npc_id,
+            doc_id=qa_entry_id or qa_doc_id,
+            description=f"{npc.name} remembers conversation: \"{player_message[:50]}...\"",
+            entry_type="qa",
+            game_day=game_day,
         )
     except Exception as e:
         logger.warning(f"remember_qa failed: {e}")
 
-    # trace: NPC internal reasoning
+    # trace: NPC reasoning
+    trace_doc_id = f"trace_{npc_id}_{ts}"
     try:
-        await cognee.remember_trace(
+        trace_id = await cognee.remember_trace(
             origin_function=f"npc_dialogue_{npc_id}",
             memory_query=player_message,
             memory_context=(
-                f"Turn {turn_count}, Day {game_day}. Trust={trust}/100, Trajectory={trajectory}. "
-                f"Cited nodes: {[c.document_id for c in recall_result.citations[:3]]}. "
-                f"trust_delta={trust_delta}, action={action}. "
-                f"Provenance query: {is_provenance_query}."
+                f"Turn {turn_count}, Day {game_day}. Trust={trust}/100. "
+                f"trust_delta={trust_delta}, action={action}."
             ),
             dataset_name=dataset_name,
             session_id=session_id,
         )
+        # Only register traces for significant events (action taken)
+        if action != "none":
+            register_memory(
+                world_id, npc_id,
+                doc_id=trace_id or trace_doc_id,
+                description=f"{npc.name}'s reasoning when triggering '{action}' (Day {game_day})",
+                entry_type="trace",
+                game_day=game_day,
+            )
     except Exception as e:
         logger.warning(f"remember_trace failed: {e}")
 
-    # feedback: bi-temporal trust update — chained to qa_entry_id if available
+    # feedback: trust update
     new_trust = update_trust(world_id, npc_id, trust_delta, event="dialogue")
     now_iso = datetime.now(timezone.utc).isoformat()
-    try:
-        if qa_entry_id:
+    feedback_doc_id = f"feedback_{npc_id}_{ts}"
+    if qa_entry_id and trust_delta != 0:
+        try:
             await cognee.remember_feedback(
                 qa_id=qa_entry_id,
-                feedback_text=(
-                    f"Trust {trust} → {new_trust} (delta={trust_delta:+d}). "
-                    f"Day {game_day}. valid_from={now_iso}."
-                ),
+                feedback_text=f"Trust {trust} → {new_trust} (delta={trust_delta:+d}). Day {game_day}.",
                 feedback_score=trust_delta,
                 dataset_name=dataset_name,
                 session_id=session_id,
             )
-    except Exception as e:
-        logger.warning(f"remember_feedback failed: {e}")
+            if trust_delta < -10:  # Only register significant trust drops
+                register_memory(
+                    world_id, npc_id,
+                    doc_id=feedback_doc_id,
+                    description=(
+                        f"{npc.name}'s trust dropped {trust}→{new_trust} "
+                        f"({'betrayal' if trust_delta < -20 else 'negative interaction'}, Day {game_day})"
+                    ),
+                    entry_type="feedback",
+                    game_day=game_day,
+                )
+        except Exception as e:
+            logger.warning(f"remember_feedback failed: {e}")
 
-    # skill_run: NPC action (if triggered)
+    # skill_run: NPC action
     if action != "none":
+        skill_doc_id = f"skill_{npc_id}_{action}_{ts}"
         try:
             await cognee.remember_skill_run(
-                run_id=f"skill_{npc_id}_{action}_{ts}",
+                run_id=skill_doc_id,
                 skill_id=action,
-                task_text=f"{npc.name} triggered '{action}' after player dialogue on Day {game_day}.",
-                result_summary=(
-                    f"Action '{action}' executed. Trust at time: {trust}/100. Turn: {turn_count}."
-                ),
+                task_text=f"{npc.name} triggered '{action}' on Day {game_day}.",
+                result_summary=f"Action '{action}'. Trust at time: {trust}/100.",
                 dataset_name=dataset_name,
                 session_id=session_id,
                 success_score=1.0,
+            )
+            register_memory(
+                world_id, npc_id,
+                doc_id=skill_doc_id,
+                description=f"{npc.name} took action: '{action}' (Day {game_day})",
+                entry_type="skill_run",
+                game_day=game_day,
             )
         except Exception as e:
             logger.warning(f"remember_skill_run failed: {e}")

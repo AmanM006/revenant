@@ -1,10 +1,6 @@
 """
 llm.py — Google Gemini via google-genai SDK.
 Plain JSON-in-prompt mode for maximum compatibility with gemini-2.5-flash.
-Fixes:
-  - max_output_tokens raised to 1500 to prevent JSON truncation
-  - Retry with exponential backoff on rate limit before cascade
-  - JSON repair for truncated responses (extract partial dialogue)
 """
 from __future__ import annotations
 
@@ -13,7 +9,6 @@ import json
 import logging
 import os
 import re
-import time
 from typing import Optional
 
 from google import genai

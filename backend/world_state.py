@@ -152,6 +152,8 @@ class WorldState:
     trust: dict[str, int] = field(default_factory=dict)
     trust_history: dict[str, list[TrustHistoryEntry]] = field(default_factory=dict)
     active_sessions: dict[str, str] = field(default_factory=dict)
+    # Stores last N dialogue turns per NPC for in-prompt conversation history
+    conversation_history: dict[str, list[dict]] = field(default_factory=dict)
     initialized: bool = False
 
 
@@ -305,3 +307,83 @@ def refresh_session(world_id: str, npc_id: str) -> str:
 
 def _new_session_id(npc_id: str) -> str:
     return f"npc_{npc_id}_session_{int(time.time())}"
+
+# ============================================================
+# MEMORY REGISTRY — tracks typed memory entries per NPC
+# Fixes amnesia modal showing "no erasable memories"
+# DO NOT replace existing world_state.py content — ADD THIS
+# ============================================================
+
+# Registry: world_id → npc_id → list of memory entries
+_memory_registry: dict[str, dict[str, list[dict]]] = {}
+
+
+def register_memory(
+    world_id: str,
+    npc_id: str,
+    doc_id: str,
+    description: str,
+    entry_type: str,
+    game_day: int = 0,
+) -> None:
+    """
+    Register a typed memory entry for an NPC.
+    Called after every cognee.remember_* call in npc_engine.py.
+    This is what feeds the amnesia modal.
+    """
+    _memory_registry.setdefault(world_id, {}).setdefault(npc_id, [])
+    # Avoid duplicates
+    existing_ids = {m["document_id"] for m in _memory_registry[world_id][npc_id]}
+    if doc_id not in existing_ids:
+        _memory_registry[world_id][npc_id].append({
+            "document_id": doc_id,
+            "description": description,
+            "type": entry_type,
+            "game_day": game_day,
+            "timestamp": "",
+            "content_preview": description[:100],
+        })
+        logger.debug(f"Memory registered: world={world_id} npc={npc_id} doc={doc_id}")
+
+
+def get_npc_memories(world_id: str, npc_id: str) -> list[dict]:
+    """
+    Get all registered memories for an NPC in this world.
+    Used by /memories/{npc_id} route for amnesia modal.
+    """
+    return list(_memory_registry.get(world_id, {}).get(npc_id, []))
+
+
+def remove_memory(world_id: str, npc_id: str, doc_id: str) -> None:
+    """
+    Remove a memory from the registry after forget() is called.
+    """
+    if world_id in _memory_registry and npc_id in _memory_registry[world_id]:
+        _memory_registry[world_id][npc_id] = [
+            m for m in _memory_registry[world_id][npc_id]
+            if m["document_id"] != doc_id
+        ]
+
+
+# ---------------------------------------------------------------------------
+# Conversation history helpers (rolling window for in-prompt context)
+# ---------------------------------------------------------------------------
+
+MAX_HISTORY_TURNS = 6  # Keep last 6 turns (player+NPC pairs)
+
+
+def push_conversation_turn(world_id: str, npc_id: str, player_msg: str, npc_reply: str) -> None:
+    """Append a turn to the rolling conversation history for this NPC."""
+    state = require_world(world_id)
+    if npc_id not in state.conversation_history:
+        state.conversation_history[npc_id] = []
+    state.conversation_history[npc_id].append({"player": player_msg, "npc": npc_reply})
+    # Keep only the last N turns
+    if len(state.conversation_history[npc_id]) > MAX_HISTORY_TURNS:
+        state.conversation_history[npc_id] = state.conversation_history[npc_id][-MAX_HISTORY_TURNS:]
+
+
+def get_conversation_history(world_id: str, npc_id: str) -> list[dict]:
+    """Return the rolling conversation history for this NPC."""
+    state = require_world(world_id)
+    return list(state.conversation_history.get(npc_id, []))

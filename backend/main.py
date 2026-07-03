@@ -285,40 +285,18 @@ async def rumor_mill(body: RumorMillRequest) -> RumorMillResponse:
 @app.get("/memories/{npc_id}")
 async def list_memories(npc_id: str, world_id: str) -> list[dict]:
     """
-    Lists all document_ids for this NPC with human-readable descriptions.
-    Used by amnesia modal to show player what they can make NPCs forget.
+    Lists NPC memories registered during this session.
+    These are the qa/trace/feedback entries written during dialogue turns.
+    Uses the in-process registry (populated by npc_engine after each remember_*)
+    so the amnesia modal shows real, per-turn memories — not raw dataset files.
     """
     if npc_id not in NPC_DEFINITIONS:
         raise HTTPException(status_code=404, detail=f"NPC '{npc_id}' not found.")
     require_world(world_id)
 
-    dataset_id = f"world_{world_id}"
-    npc = NPC_DEFINITIONS[npc_id]
-
-    try:
-        raw_docs = await cognee.list_documents(dataset_id, npc_id)
-    except Exception as e:
-        logger.error(f"list_documents error for {npc_id}: {e}")
-        raw_docs = []
-
-    # Enrich with human-readable descriptions
-    formatted: list[dict] = []
-    for doc in raw_docs:
-        doc_id = doc.get("document_id", "")
-        doc_type = _infer_doc_type(doc_id)
-        description = _describe_document(doc_id, doc_type, npc.name)
-        formatted.append(
-            {
-                "document_id": doc_id,
-                "description": description,
-                "type": doc_type,
-                "game_day": doc.get("metadata", {}).get("game_day", "?"),
-                "timestamp": doc.get("metadata", {}).get("timestamp", ""),
-                "content_preview": doc.get("content", "")[:100],
-            }
-        )
-
-    return formatted
+    from backend.world_state import get_npc_memories
+    memories = get_npc_memories(world_id, npc_id)
+    return memories
 
 
 # ---------------------------------------------------------------------------
