@@ -53,8 +53,7 @@
     background-color: var(--bg-void);
     color: var(--text-primary);
     font-family: var(--font-body);
-    height: 100%;
-    overflow: hidden;
+    min-height: 100%;
   }
 
   /* Scrollbar styling */
