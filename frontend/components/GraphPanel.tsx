@@ -1,9 +1,9 @@
 "use client";
-// components/GraphPanel.tsx — react-force-graph-2d live knowledge graph
+// components/GraphPanel.tsx — Live knowledge graph panel using react-force-graph-2d with canvas animation and rumor flash
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { GraphData, GraphNode } from "@/lib/types";
+import type { GraphData, GraphNode, GraphLink } from "@/lib/types";
 
 // Dynamic import — ForceGraph2D is canvas-based, no SSR
 const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), { ssr: false });
@@ -14,56 +14,41 @@ interface Props {
   pulsatingEdges: Array<{ from: string; to: string }>;
 }
 
-const NODE_TYPE_COLORS: Record<string, string> = {
-  npc: "#7C3AED",
-  player: "#F8FAFC",
-  rumor: "#F97316",
-  trust: "#F59E0B",
-  event: "#3B82F6",
-  unknown: "#64748B",
-};
 
-const EDGE_TYPE_COLORS: Record<string, string> = {
-  trust: "#22C55E",
-  rumor: "#F97316",
-  event: "#3B82F6",
-  unknown: "#64748B",
-};
-
-const NODE_LABELS: Record<string, string> = {
-  silas: "Silas",
-  elara: "Elara",
-  kael: "Kael",
-  player: "Player",
-};
-
-const LEGEND = [
-  { type: "NPC", color: "#7C3AED" },
-  { type: "Player", color: "#F8FAFC" },
-  { type: "Event", color: "#3B82F6" },
-  { type: "Rumor", color: "#F97316" },
-  { type: "Trust", color: "#F59E0B" },
-];
 
 export function GraphPanel({ graphData, dissolvingNodes, pulsatingEdges }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = useState({ width: 400, height: 400 });
-  const [rumorEdgeOpacity, setRumorEdgeOpacity] = useState(1);
-  const animRef = useRef<number | null>(null);
+  const [dimensions, setDimensions] = useState({ width: 360, height: 400 });
+  const [showFlash, setShowFlash] = useState(false);
+  const prevEdgesCount = useRef(pulsatingEdges.length);
 
-  // Pulsating animation for rumor edges
+  // Dissolve animation state
+  const [dissolveTimes, setDissolveTimes] = useState<Record<string, number>>({});
+
   useEffect(() => {
-    let t = 0;
-    function animate() {
-      t += 0.05;
-      setRumorEdgeOpacity(0.5 + 0.5 * Math.sin(t));
-      animRef.current = requestAnimationFrame(animate);
+    const now = Date.now();
+    let changed = false;
+    const nextTimes = { ...dissolveTimes };
+    for (const node of Array.from(dissolvingNodes)) {
+      if (!nextTimes[node]) {
+        nextTimes[node] = now;
+        changed = true;
+      }
     }
-    animRef.current = requestAnimationFrame(animate);
-    return () => {
-      if (animRef.current) cancelAnimationFrame(animRef.current);
-    };
-  }, []);
+    if (changed) {
+      setDissolveTimes(nextTimes);
+    }
+  }, [dissolvingNodes, dissolveTimes]);
+
+  // Flash overlay trigger when a rumor is injected
+  useEffect(() => {
+    if (pulsatingEdges.length > prevEdgesCount.current) {
+      setShowFlash(true);
+      const timer = setTimeout(() => setShowFlash(false), 2000);
+      return () => clearTimeout(timer);
+    }
+    prevEdgesCount.current = pulsatingEdges.length;
+  }, [pulsatingEdges]);
 
   // Measure container
   useEffect(() => {
@@ -82,132 +67,152 @@ export function GraphPanel({ graphData, dissolvingNodes, pulsatingEdges }: Props
     return () => ro.disconnect();
   }, []);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // Node Canvas Painter
   const nodeCanvasObject = useCallback(
-    (rawNode: unknown, ctx: CanvasRenderingContext2D) => {
+    (rawNode: unknown, ctx: CanvasRenderingContext2D, globalScale: number) => {
       const node = rawNode as GraphNode & { x?: number; y?: number };
       const x = node.x ?? 0;
       const y = node.y ?? 0;
       const nodeId = String(node.id ?? "");
-      const isDissolving = dissolvingNodes.has(nodeId);
-      const alpha = isDissolving ? 0.2 : 1;
-      const nodeType = (node.nodeType as string) ?? "event";
-      const radius = nodeType === "npc" ? 8 : nodeType === "player" ? 7 : 5;
-      const color = NODE_TYPE_COLORS[nodeType] ?? "#64748B";
+
+      const labelText = String(node.label ?? node.id ?? "");
+      const lowercaseLabel = labelText.toLowerCase();
+
+      const isNPC = ["silas", "elara", "kael"].some((n) => lowercaseLabel.includes(n));
+      const isPlayer = lowercaseLabel.includes("player");
+      const isRumor = lowercaseLabel.includes("rumor") || lowercaseLabel.includes("warn");
+      const isTrust = lowercaseLabel.includes("trust") || lowercaseLabel.includes("feedback");
+
+      let color = "#3B82F6";
+      if (isNPC) color = "#7C3AED";
+      else if (isPlayer) color = "#F8FAFC";
+      else if (isRumor) color = "#F97316";
+      else if (isTrust) color = "#F59E0B";
+
+      let radius = isNPC ? 10 : 5;
+      let alpha = 1;
+
+      // Animate node dissolve
+      const startTime = dissolveTimes[nodeId];
+      if (startTime) {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(1, elapsed / 600); // 600ms duration
+        radius *= 1 - progress;
+        alpha *= 1 - progress;
+      }
 
       ctx.save();
       ctx.globalAlpha = alpha;
 
-      // Glow for NPC nodes
-      if (nodeType === "npc") {
-        ctx.shadowColor = color;
-        ctx.shadowBlur = 12;
-      }
-
+      // Draw node circle
       ctx.beginPath();
       ctx.arc(x, y, radius, 0, 2 * Math.PI);
       ctx.fillStyle = color;
+
+      if (isNPC) {
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 15;
+      }
       ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,0.15)";
+
+      // Thin stroke
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
       ctx.lineWidth = 1;
       ctx.stroke();
 
-      // Label
-      const label = (node.label as string | undefined) ?? NODE_LABELS[nodeId] ?? nodeId.slice(0, 8);
-      ctx.font = "10px JetBrains Mono, monospace";
-      ctx.fillStyle = "rgba(226, 232, 240, 0.85)";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "top";
-      ctx.shadowBlur = 0;
-      ctx.fillText(label, x, y + radius + 2);
+      // Render Label
+      if (isNPC || globalScale > 2) {
+        ctx.font = `${isNPC ? "700" : "400"} ${isNPC ? 10 : 8}px Cinzel`;
+        ctx.fillStyle = "#E2E8F0";
+        ctx.textAlign = "center";
+        ctx.shadowBlur = 0;
+        const namePart = labelText.split("_")[0]?.substring(0, 12) || "";
+        ctx.fillText(namePart, x, y + radius + 10);
+      }
 
       ctx.restore();
     },
-    [dissolvingNodes]
-  );
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const linkCanvasObject = useCallback(
-    (rawLink: unknown, ctx: CanvasRenderingContext2D) => {
-      const link = rawLink as {
-        source: unknown;
-        target: unknown;
-        edgeType?: string;
-      };
-      const srcNode = link.source as { x?: number; y?: number; id?: string };
-      const tgtNode = link.target as { x?: number; y?: number; id?: string };
-      if (!srcNode.x || !srcNode.y || !tgtNode.x || !tgtNode.y) return;
-
-      const edgeType = link.edgeType ?? "event";
-      const isRumor = edgeType === "rumor";
-      const srcId = String(srcNode.id ?? "");
-      const tgtId = String(tgtNode.id ?? "");
-      const isPulsating = pulsatingEdges.some(
-        (e) =>
-          (e.from === srcId && e.to === tgtId) ||
-          (e.from === tgtId && e.to === srcId)
-      );
-
-      const color = EDGE_TYPE_COLORS[edgeType] ?? "#64748B";
-      const opacity = isRumor && isPulsating ? rumorEdgeOpacity : 0.5;
-
-      ctx.save();
-      ctx.globalAlpha = opacity;
-      ctx.beginPath();
-      ctx.moveTo(srcNode.x, srcNode.y);
-      ctx.lineTo(tgtNode.x, tgtNode.y);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = isRumor ? 2 : 1;
-      if (isRumor) ctx.setLineDash([4, 4]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.restore();
-    },
-    [rumorEdgeOpacity, pulsatingEdges]
+    [dissolveTimes]
   );
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Graph canvas */}
-      <div ref={containerRef} className="flex-1 min-h-0 relative overflow-hidden rounded-lg border border-border">
+    <div className="flex flex-col h-full bg-void rounded-xl border border-border p-3 overflow-hidden shadow-xl">
+      {/* Graph Area */}
+      <div ref={containerRef} className="flex-1 min-h-0 relative overflow-hidden rounded-lg bg-[#06080F]">
         <ForceGraph2D
           graphData={graphData}
           width={dimensions.width}
           height={dimensions.height}
-          backgroundColor="#080B14"
+          backgroundColor="#06080F"
           nodeCanvasObject={nodeCanvasObject}
-          linkCanvasObject={linkCanvasObject}
-          nodeRelSize={4}
-          linkDirectionalParticles={2}
+          nodeRelSize={6}
+          linkColor={(link) => {
+            const l = link as GraphLink;
+            return l.edgeType === "rumor" ? "#F97316" : l.edgeType === "trust" ? "#10B981" : "#1E2A45";
+          }}
+          linkWidth={(link) => {
+            const l = link as GraphLink;
+            return l.edgeType === "rumor" ? 2 : 1;
+          }}
+          linkDirectionalParticles={(link) => {
+            const l = link as GraphLink;
+            return l.edgeType === "rumor" ? 4 : 0;
+          }}
+          linkDirectionalParticleColor={() => "#F97316"}
           linkDirectionalParticleSpeed={0.005}
           cooldownTicks={100}
-          onEngineStop={() => {}}
         />
+
+        {/* Rumor Flash Overlay */}
+        <div
+          className={`absolute inset-0 bg-orange-500/10 pointer-events-none z-30 flex items-start justify-center pt-8 transition-opacity duration-500 ${
+            showFlash ? "opacity-100" : "opacity-0"
+          }`}
+        >
+          <div className="bg-void/90 border border-orange text-orange font-display tracking-widest text-[11px] font-bold px-4 py-1.5 rounded-full shadow-lg shadow-orange/20 animate-pulse">
+            ⚡ RUMOR PROPAGATING
+          </div>
+        </div>
+
         {graphData.nodes.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center">
             <p className="text-muted font-mono text-xs text-center">
               No graph data yet.<br />
-              Initialize world to seed knowledge graph.
+              Seeding world...
             </p>
           </div>
         )}
       </div>
 
-      {/* Legend */}
-      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 px-1">
-        {LEGEND.map(({ type, color }) => (
-          <div key={type} className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full" style={{ background: color }} />
-            <span className="text-[10px] font-mono text-muted">{type}</span>
+      {/* Legend Block */}
+      <div className="mt-3 flex flex-wrap justify-between items-center gap-y-1.5 border-t border-border/40 pt-3">
+        <div className="flex flex-wrap gap-x-2 gap-y-1">
+          <div className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-purple" />
+            <span className="text-[10px] font-mono text-secondary">NPC</span>
           </div>
-        ))}
-        <div className="flex items-center gap-1.5 ml-auto">
-          <span className="w-4 border-t border-orange-500 border-dashed" />
-          <span className="text-[10px] font-mono text-orange-400">Rumor</span>
+          <div className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-[#F8FAFC]" />
+            <span className="text-[10px] font-mono text-secondary">Player</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-[#3B82F6]" />
+            <span className="text-[10px] font-mono text-secondary">Event</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-orange" />
+            <span className="text-[10px] font-mono text-secondary">Rumor</span>
+          </div>
         </div>
-        <div className="flex items-center gap-1.5">
-          <span className="w-4 border-t border-green-500" />
-          <span className="text-[10px] font-mono text-muted">Trust</span>
+        <div className="flex gap-x-2.5 items-center">
+          <div className="flex items-center gap-1">
+            <span className="w-3 border-t border-green" />
+            <span className="text-[10px] font-mono text-secondary">Trust</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="w-3 border-t border-orange border-dashed" />
+            <span className="text-[10px] font-mono text-secondary">Rumor</span>
+          </div>
         </div>
       </div>
     </div>

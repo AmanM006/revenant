@@ -1,10 +1,17 @@
 import type { Metadata } from "next";
-import { Cinzel, Inter, JetBrains_Mono } from "next/font/google";
+import { Cinzel, Inter, JetBrains_Mono, Cinzel_Decorative } from "next/font/google";
 import "./globals.css";
 
 const cinzel = Cinzel({
   subsets: ["latin"],
   variable: "--font-display",
+  display: "swap",
+});
+
+const cinzelDecorative = Cinzel_Decorative({
+  weight: "700",
+  subsets: ["latin"],
+  variable: "--font-decorative",
   display: "swap",
 });
 
@@ -38,7 +45,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${cinzel.variable} ${inter.variable} ${jetbrainsMono.variable}`}>
+    <html lang="en" className={`${cinzel.variable} ${cinzelDecorative.variable} ${inter.variable} ${jetbrainsMono.variable}`}>
       <body className="bg-base text-text antialiased min-h-screen overflow-hidden">
         {children}
       </body>

@@ -1,5 +1,5 @@
 "use client";
-// components/AmnesiaModal.tsx — document_id picker for surgical forget()
+// components/AmnesiaModal.tsx — Redesigned amnesia memory selector modal with type badges and radio items
 
 import { useEffect, useState } from "react";
 import { forgetMemory, listMemories } from "@/lib/api";
@@ -16,19 +16,24 @@ interface Props {
 
 const ENTRY_TYPE_LABELS: Record<string, string> = {
   qa: "Dialogue",
-  feedback: "Behavior record",
-  trace: "Internal trace",
-  skill_run: "Rumor / Action",
+  feedback: "Behavior",
+  trace: "Reasoning",
+  skill_run: "Action",
   unknown: "Memory",
 };
 
 function typeColor(type: string): string {
   switch (type) {
-    case "qa": return "text-blue-400 bg-blue-900/20 border-blue-800/40";
-    case "feedback": return "text-amber-400 bg-amber-900/20 border-amber-800/40";
-    case "trace": return "text-violet-400 bg-violet-900/20 border-violet-800/40";
-    case "skill_run": return "text-orange-400 bg-orange-900/20 border-orange-800/40";
-    default: return "text-muted bg-white/5 border-border";
+    case "qa":
+      return "text-blue bg-blue/10 border-blue/30";
+    case "feedback":
+      return "text-amber bg-amber/10 border-amber/30";
+    case "trace":
+      return "text-purple-glow bg-purple-dim/30 border-purple/30";
+    case "skill_run":
+      return "text-orange bg-orange-dim/20 border-orange/30";
+    default:
+      return "text-primary bg-white/5 border-border";
   }
 }
 
@@ -92,87 +97,113 @@ export function AmnesiaModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: "rgba(8,11,20,0.85)", backdropFilter: "blur(8px)" }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in"
+      style={{ background: "rgba(6,8,15,0.85)", backdropFilter: "blur(8px)" }}
     >
-      <div className="bg-surface border border-accent/40 rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center gap-3 px-5 py-4 border-b border-border">
+      <div className="bg-surface border border-purple/40 rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden animate-slide-up">
+        {/* Header Block */}
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-border bg-raised">
           <span className="text-2xl">🧠</span>
           <div>
-            <h2 className="font-display font-bold text-text text-lg">Amnesia Spell</h2>
-            <p className="text-xs text-muted">
-              Erase a specific memory from {npcName}&apos;s mind — costs{" "}
-              <span className="text-accent2 font-bold">50g</span>. You have{" "}
-              <span className={gold < 50 ? "text-danger" : "text-accent2"}>
+            <h2 className="font-display font-bold text-primary text-base tracking-wider uppercase">
+              Amnesia Spell
+            </h2>
+            <p className="text-[11px] font-body text-secondary mt-0.5">
+              Erase a specific memory from <span className="text-purple-glow font-semibold">{npcName}</span>&apos;s mind.
+            </p>
+            <p className="text-[10px] font-mono text-muted mt-0.5">
+              Cost: <span className="text-amber-glow font-bold">50g</span> · You have:{" "}
+              <span className={gold < 50 ? "text-red font-bold" : "text-amber-glow font-bold"}>
                 {gold}g
               </span>
-              .
             </p>
           </div>
           <button
             onClick={onClose}
-            className="ml-auto text-muted hover:text-text text-xl transition-colors"
+            className="ml-auto text-secondary hover:text-primary text-lg transition-colors cursor-pointer"
           >
             ✕
           </button>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        {/* Content list */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 bg-void/35">
           {loading && (
-            <div className="flex items-center gap-2 text-muted text-sm">
-              <span className="w-3 h-3 border-2 border-muted/30 border-t-muted rounded-full animate-spin" />
-              Loading memories...
+            <div className="flex items-center gap-2 text-secondary text-xs font-mono justify-center py-10">
+              <span className="w-4 h-4 border-2 border-purple-glow/30 border-t-purple-glow rounded-full animate-spin" />
+              Tapping magical vectors...
             </div>
           )}
 
           {!loading && docs.length === 0 && (
-            <p className="text-muted text-sm font-mono text-center py-6">
-              {npcName} has no erasable memories yet.<br />
-              Interact with them first.
-            </p>
+            <div className="text-center py-12">
+              <p className="text-secondary text-xs font-mono">
+                {npcName} has no erasable memories yet.
+              </p>
+              <p className="text-[10px] text-muted font-body mt-1">
+                Interact with them in dialogue to register memories.
+              </p>
+            </div>
           )}
 
           {!loading && docs.length > 0 && (
             <div className="space-y-2">
+              <p className="text-[10px] font-display text-muted uppercase tracking-wider mb-2">
+                Select memory to sever:
+              </p>
+
               {docs.map((doc) => {
                 const isSelected = selected === doc.document_id;
+                const safeDesc = doc.description.replace("→", "->");
+
                 return (
                   <button
                     key={doc.document_id}
                     onClick={() => setSelected(isSelected ? null : doc.document_id)}
                     className={`
-                      w-full text-left rounded-lg p-3 border transition-all duration-150
-                      ${isSelected
-                        ? "border-accent bg-accent/10"
-                        : "border-border bg-white/5 hover:border-accent/30"
+                      w-full text-left rounded-xl p-3 border transition-all duration-200 flex items-start gap-3
+                      ${
+                        isSelected
+                          ? "border-purple bg-purple/10 shadow-[0_0_12px_rgba(124,58,237,0.1)]"
+                          : "border-border bg-raised hover:border-bright hover:bg-hover"
                       }
                     `}
                   >
-                    <div className="flex items-start gap-2">
-                      <span
-                        className={`text-[10px] font-mono px-1.5 py-0.5 rounded border shrink-0 ${typeColor(doc.type)}`}
+                    {/* Radio input circle icon */}
+                    <div className="mt-1 shrink-0">
+                      <div
+                        className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${
+                          isSelected ? "border-purple bg-purple" : "border-border bg-void"
+                        }`}
                       >
-                        {ENTRY_TYPE_LABELS[doc.type] ?? doc.type}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-sm text-text leading-snug">{doc.description}</p>
-                        {doc.game_day !== "?" && (
-                          <p className="text-[10px] text-muted font-mono mt-0.5">
-                            Day {doc.game_day}
-                            {doc.timestamp ? ` · ${doc.timestamp.slice(0, 16).replace("T", " ")}` : ""}
-                          </p>
-                        )}
-                        <p className="text-[10px] font-mono text-muted/60 mt-0.5 truncate">
-                          {doc.document_id}
-                        </p>
-                        {doc.content_preview && (
-                          <p className="text-[11px] text-muted mt-1 leading-relaxed">
-                            {doc.content_preview}
-                          </p>
+                        {isSelected && (
+                          <div className="w-1.5 h-1.5 rounded-full bg-white" />
                         )}
                       </div>
+                    </div>
+
+                    {/* Description details */}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                        <span
+                          className={`text-[9px] font-display tracking-wider font-semibold px-2 py-0.5 rounded border uppercase shrink-0 ${typeColor(
+                            doc.type
+                          )}`}
+                        >
+                          {ENTRY_TYPE_LABELS[doc.type] ?? doc.type}
+                        </span>
+                        {doc.game_day !== "?" && (
+                          <span className="text-[9px] text-muted font-mono">
+                            Day {doc.game_day}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-primary font-body leading-snug break-words">
+                        {safeDesc}
+                      </p>
+                      <p className="text-[9px] font-mono text-muted/65 mt-1 truncate">
+                        ID: {doc.document_id}
+                      </p>
                     </div>
                   </button>
                 );
@@ -181,23 +212,23 @@ export function AmnesiaModal({
           )}
         </div>
 
-        {/* Footer */}
-        <div className="px-5 py-4 border-t border-border flex items-center gap-3">
+        {/* Footer actions */}
+        <div className="px-5 py-4 border-t border-border flex items-center gap-3 bg-raised">
           {error && (
-            <p className="text-danger text-xs font-mono flex-1">{error}</p>
+            <p className="text-red text-xs font-mono flex-1 leading-tight break-words">{error}</p>
           )}
           {success && !error && (
-            <p className="text-green-400 text-xs font-mono flex-1">{success}</p>
+            <p className="text-green text-xs font-mono flex-1 leading-tight break-words">{success}</p>
           )}
           {!error && !success && (
-            <p className="text-muted text-xs flex-1">
-              {selected ? "Selected. Click Cast to proceed." : "Select a memory to erase."}
+            <p className="text-secondary text-[11px] font-body flex-1">
+              {selected ? "Arcane vector aligned. Cast spell when ready." : "Select a memory to sever."}
             </p>
           )}
 
           <button
             onClick={onClose}
-            className="px-3 py-1.5 text-sm text-muted hover:text-text border border-border rounded-lg transition-colors"
+            className="px-3.5 py-2 text-xs font-display tracking-wider uppercase text-secondary hover:text-primary border border-border rounded-lg transition-colors cursor-pointer bg-surface"
           >
             Cancel
           </button>
@@ -206,18 +237,18 @@ export function AmnesiaModal({
             onClick={handleCast}
             disabled={!selected || casting !== null || gold < 50}
             className="
-              px-4 py-1.5 bg-accent hover:bg-accent/80 disabled:opacity-40
-              text-white text-sm font-semibold rounded-lg transition-colors
-              flex items-center gap-2
+              px-4 py-2 bg-purple hover:bg-purple-glow disabled:opacity-40
+              text-white text-xs font-display tracking-wider uppercase rounded-lg transition-all duration-200
+              flex items-center gap-2 cursor-pointer
             "
           >
             {casting ? (
               <>
-                <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                Casting...
+                <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <span>Severing...</span>
               </>
             ) : (
-              "Cast Amnesia (-50g)"
+              "Cast Spell"
             )}
           </button>
         </div>

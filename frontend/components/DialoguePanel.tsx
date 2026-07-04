@@ -1,28 +1,31 @@
 "use client";
-// components/DialoguePanel.tsx — Chat interface with citation log
+// components/DialoguePanel.tsx — Overhauled chat panel with custom speech bubbles and tree-styled citation log
 
 import { useEffect, useRef, useState } from "react";
 import { CitationLog } from "./CitationLog";
+import { Silas } from "./portraits/Silas";
+import { Elara } from "./portraits/Elara";
+import { Kael } from "./portraits/Kael";
 import type { ChatMessage, NpcId } from "@/lib/types";
 
 interface Props {
   npcId: NpcId;
   npcName: string;
   messages: ChatMessage[];
+  trust: number;
   isThinking: boolean;
   onSend: (message: string) => void;
 }
 
-const NPC_COLORS: Record<NpcId, string> = {
-  silas: "#78350F",
-  elara: "#4C1D95",
-  kael: "#1E3A5F",
-};
-
-const NPC_ICONS: Record<NpcId, string> = {
-  silas: "🔨",
-  elara: "✦",
-  kael: "⚔",
+const PortraitComponent = ({ id, size }: { id: NpcId; size?: number }) => {
+  switch (id) {
+    case "silas":
+      return <Silas size={size} />;
+    case "elara":
+      return <Elara size={size} />;
+    case "kael":
+      return <Kael size={size} />;
+  }
 };
 
 const QUICK_ACTIONS: Array<{ label: string; value: string }> = [
@@ -32,7 +35,7 @@ const QUICK_ACTIONS: Array<{ label: string; value: string }> = [
   { label: "I'm innocent!", value: "I'm innocent. You've been misled about me." },
 ];
 
-export function DialoguePanel({ npcId, npcName, messages, isThinking, onSend }: Props) {
+export function DialoguePanel({ npcId, npcName, messages, trust, isThinking, onSend }: Props) {
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -56,101 +59,108 @@ export function DialoguePanel({ npcId, npcName, messages, isThinking, onSend }: 
     }
   }
 
-  const npcColor = NPC_COLORS[npcId];
-  const npcIcon = NPC_ICONS[npcId];
-
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div
-        className="flex items-center gap-2 px-3 py-2 border-b border-border rounded-t-lg"
-        style={{ background: `${npcColor}22` }}
-      >
-        <div
-          className="w-7 h-7 rounded-full flex items-center justify-center text-sm border border-white/20"
-          style={{ background: npcColor }}
-        >
-          {npcIcon}
+    <div className="flex flex-col h-full bg-surface border border-border rounded-xl overflow-hidden shadow-xl">
+      {/* Header Section */}
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-raised">
+        <div className="w-10 h-10 rounded-full overflow-hidden border border-border bg-void shrink-0">
+          <PortraitComponent id={npcId} size={40} />
         </div>
-        <span className="text-sm font-display font-semibold text-text">{npcName}</span>
-        <span className="text-xs text-muted ml-1">— dialogue</span>
-        {isThinking && (
-          <div className="ml-auto flex gap-0.5 items-center">
-            <span className="text-xs text-accent font-mono">thinking</span>
-            <span className="animate-bounce delay-75 text-accent text-sm ml-1">.</span>
-            <span className="animate-bounce delay-150 text-accent text-sm">.</span>
-            <span className="animate-bounce delay-300 text-accent text-sm">.</span>
-          </div>
-        )}
+        <div className="min-w-0">
+          <h2 className="text-sm font-display font-bold text-primary tracking-wide uppercase leading-tight">
+            {npcName}
+          </h2>
+          <span className="text-[10px] font-mono text-muted uppercase tracking-widest">
+            dialogue mode
+          </span>
+        </div>
+
+        {/* Trust badge */}
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-[10px] font-mono text-secondary uppercase tracking-widest hidden sm:inline">
+            trust level:
+          </span>
+          <span className="text-xs font-mono font-bold bg-amber-dim/30 border border-amber/30 text-amber-glow px-2 py-0.5 rounded">
+            {trust}/100
+          </span>
+        </div>
       </div>
 
-      {/* Message list */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0">
+      {/* Message List */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0 bg-void/30">
         {messages.length === 0 && (
-          <div className="text-center text-muted text-sm mt-8 font-mono">
-            Approach {npcName} and speak your mind...
+          <div className="text-center text-muted text-xs mt-12 font-mono max-w-xs mx-auto leading-relaxed border border-border/20 rounded-lg p-4 bg-void/50">
+            📖 You stand before {npcName}. Speak with honor, or tread carefully. Their memory is absolute.
           </div>
         )}
 
         {messages.map((msg) => {
           const isNpc = msg.sender !== "player";
           return (
-            <div key={msg.id} className={`flex ${isNpc ? "justify-start" : "justify-end"}`}>
-              <div className={`max-w-[80%] ${isNpc ? "" : "ml-auto"}`}>
-                {/* Bubble */}
-                <div
-                  className={`px-3 py-2 rounded-xl text-sm leading-relaxed ${
-                    isNpc
-                      ? "bg-surface border border-border text-text rounded-tl-sm"
-                      : "bg-accent/80 text-white rounded-tr-sm"
-                  }`}
-                >
-                  {msg.text}
-                </div>
+            <div key={msg.id} className={`flex flex-col ${isNpc ? "items-start" : "items-end"}`}>
+              {/* NPC Name Title above bubble */}
+              {isNpc && (
+                <span className="font-display text-[10px] text-purple-glow tracking-wider mb-1 ml-2">
+                  {npcName.toUpperCase()}
+                </span>
+              )}
 
-                {/* Trust delta badge (NPC only) */}
-                {isNpc && msg.trust_delta !== undefined && msg.trust_delta !== 0 && (
-                  <div className="flex items-center gap-1.5 mt-1 ml-1">
-                    <span
-                      className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
-                        msg.trust_delta > 0
-                          ? "bg-green-900/40 text-green-300"
-                          : "bg-red-900/40 text-danger"
-                      }`}
-                    >
-                      Trust {msg.trust_delta > 0 ? "+" : ""}
-                      {msg.trust_delta}
-                    </span>
-                    {msg.action && msg.action !== "none" && (
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-orange-900/40 text-orange-300">
-                        {msg.action.replace("_", " ")}
-                      </span>
-                    )}
-                  </div>
-                )}
-
-                {/* Citations */}
-                {isNpc && (msg.citations?.length || msg.provenance_chain?.length) ? (
-                  <div className="ml-1">
-                    <CitationLog
-                      citations={msg.citations ?? []}
-                      provenance={msg.provenance_chain}
-                    />
-                  </div>
-                ) : null}
+              {/* Message bubble */}
+              <div
+                className={`px-4 py-2.5 rounded-xl text-[14px] font-body leading-relaxed max-w-[80%] ${
+                  isNpc
+                    ? "bg-surface border border-border text-primary rounded-tl-none border-l-2 border-l-purple"
+                    : "bg-raised border border-border/80 text-primary rounded-tr-none border-r-2 border-r-amber ml-auto"
+                }`}
+              >
+                {msg.text}
               </div>
+
+              {/* Trust delta badge (NPC only) */}
+              {isNpc && msg.trust_delta !== undefined && msg.trust_delta !== 0 && (
+                <div className="flex items-center gap-1.5 mt-1 ml-2">
+                  <span
+                    className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded border ${
+                      msg.trust_delta > 0
+                        ? "bg-green/10 border-green/30 text-green"
+                        : "bg-red/10 border-red/30 text-red"
+                    }`}
+                  >
+                    Trust {msg.trust_delta > 0 ? "+" : ""}
+                    {msg.trust_delta}
+                  </span>
+                  {msg.action && msg.action !== "none" && (
+                    <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-orange-dim/20 border border-orange/20 text-orange">
+                      {msg.action.replace("_", " ")}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* Citations block */}
+              {isNpc && (msg.citations?.length || msg.provenance_chain?.length) ? (
+                <div className="w-full max-w-[90%] mt-2 ml-2">
+                  <CitationLog
+                    citations={msg.citations ?? []}
+                    provenance={msg.provenance_chain}
+                  />
+                </div>
+              ) : null}
             </div>
           );
         })}
 
         {/* Typing indicator */}
         {isThinking && (
-          <div className="flex justify-start">
-            <div className="bg-surface border border-border px-3 py-2 rounded-xl rounded-tl-sm">
-              <div className="flex gap-1 items-center h-4">
-                <span className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce [animation-delay:0ms]" />
-                <span className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce [animation-delay:150ms]" />
-                <span className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce [animation-delay:300ms]" />
+          <div className="flex flex-col items-start">
+            <span className="font-display text-[10px] text-purple-glow tracking-wider mb-1 ml-2">
+              {npcName.toUpperCase()}
+            </span>
+            <div className="bg-surface border border-border px-4 py-3 rounded-xl rounded-tl-none border-l-2 border-l-purple">
+              <div className="flex gap-1.5 items-center h-2">
+                <span className="w-1.5 h-1.5 bg-purple rounded-full animate-bounce [animation-delay:0ms]" />
+                <span className="w-1.5 h-1.5 bg-purple rounded-full animate-bounce [animation-delay:150ms]" />
+                <span className="w-1.5 h-1.5 bg-purple rounded-full animate-bounce [animation-delay:300ms]" />
               </div>
             </div>
           </div>
@@ -159,22 +169,25 @@ export function DialoguePanel({ npcId, npcName, messages, isThinking, onSend }: 
         <div ref={bottomRef} />
       </div>
 
-      {/* Quick actions */}
-      <div className="px-3 py-1.5 border-t border-border flex gap-1.5 flex-wrap">
+      {/* Quick Action Chips */}
+      <div className="px-4 py-2 border-t border-border bg-surface/50 flex gap-2 flex-wrap items-center">
+        <span className="text-[9px] font-mono text-muted uppercase tracking-wider mr-1">
+          Quick Speak:
+        </span>
         {QUICK_ACTIONS.map((qa) => (
           <button
             key={qa.label}
             onClick={() => onSend(qa.value)}
             disabled={isThinking}
-            className="text-[10px] font-mono px-2 py-1 rounded border border-border text-muted hover:text-text hover:border-accent/40 transition-colors disabled:opacity-40"
+            className="text-[11px] font-body px-2.5 py-1 rounded border border-border text-secondary hover:text-primary hover:border-bright hover:bg-hover transition-all duration-150 disabled:opacity-40"
           >
             {qa.label}
           </button>
         ))}
       </div>
 
-      {/* Input */}
-      <div className="flex gap-2 p-3 border-t border-border">
+      {/* Input area */}
+      <div className="flex gap-2 p-3 border-t border-border bg-raised">
         <input
           ref={inputRef}
           id="dialogue-input"
@@ -185,8 +198,8 @@ export function DialoguePanel({ npcId, npcName, messages, isThinking, onSend }: 
           disabled={isThinking}
           placeholder={`Speak to ${npcName}...`}
           className="
-            flex-1 bg-white/5 border border-border rounded-lg px-3 py-2 text-sm text-text
-            placeholder:text-muted outline-none focus:border-accent transition-colors
+            flex-1 bg-void border border-border rounded-lg px-3 py-2 text-[14px] text-primary
+            placeholder:text-muted outline-none focus:border-purple focus:ring-1 focus:ring-purple/20 transition-all duration-200
             disabled:opacity-50 font-body
           "
         />
@@ -195,8 +208,7 @@ export function DialoguePanel({ npcId, npcName, messages, isThinking, onSend }: 
           onClick={handleSend}
           disabled={isThinking || !input.trim()}
           className="
-            px-4 py-2 bg-accent hover:bg-accent/80 disabled:opacity-40
-            text-white text-sm font-semibold rounded-lg transition-colors
+            px-5 py-2 bg-purple hover:bg-purple-glow text-white text-xs font-display tracking-wider uppercase rounded-lg transition-all duration-200 disabled:opacity-40
           "
         >
           Send
