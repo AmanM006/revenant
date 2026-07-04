@@ -56,27 +56,42 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen bg-void text-primary selection:bg-purple/30 font-body scroll-smooth">
-      {/* ------------------------------------------------------------------ */}
-      {/* SECTION 1: HERO HEADER & ABOVE FOLD                                 */}
-      {/* ------------------------------------------------------------------ */}
-      <section className="min-h-screen flex flex-col relative justify-between px-6 py-6 border-b border-border">
-        <ParticleField />
-        
-        {/* Header containing ONLY the top-right plain text link */}
-        <header className="flex justify-end max-w-6xl mx-auto w-full z-10">
+      {/* Sticky Floating Navbar */}
+      <header className="sticky top-0 left-0 right-0 z-50 bg-[#06080F]/85 backdrop-blur-md border-b border-border/40 px-6 py-4 flex items-center justify-between">
+        <div className="max-w-6xl mx-auto w-full flex items-center justify-between">
+          <Link href="/" className="font-decorative text-sm text-purple-glow tracking-[0.2em] header-glow uppercase">
+            REVENANT
+          </Link>
+          
+          <nav className="hidden md:flex items-center gap-8 font-display text-[10px] uppercase tracking-[0.25em] text-secondary">
+            <a href="#hero" className="hover:text-purple-glow transition-colors">Hero</a>
+            <a href="#problem" className="hover:text-purple-glow transition-colors">Problem</a>
+            <a href="#solution" className="hover:text-purple-glow transition-colors">Solution</a>
+            <a href="#api" className="hover:text-purple-glow transition-colors">API Surface</a>
+            <a href="#npcs" className="hover:text-purple-glow transition-colors">NPCs</a>
+          </nav>
+
           <Link
             href="/play"
-            className="hover:text-purple-glow transition-colors cursor-pointer uppercase font-semibold"
+            className="hover:text-purple-glow transition-colors cursor-pointer uppercase font-semibold font-display text-[11px] tracking-[0.15em]"
             style={{
               fontFamily: "Cinzel",
-              fontSize: "13px",
-              letterSpacing: "0.15em",
               color: "var(--text-secondary)",
             }}
           >
             Enter World
           </Link>
-        </header>
+        </div>
+      </header>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* SECTION 1: HERO HEADER & ABOVE FOLD                                 */}
+      {/* ------------------------------------------------------------------ */}
+      <section id="hero" className="min-h-screen flex flex-col relative justify-between px-6 py-6 border-b border-border">
+        <ParticleField />
+        
+        {/* Top spacer for vertical alignment */}
+        <div className="h-8 z-10" />
 
         {/* Hero Title */}
         <div className="text-center max-w-3xl mx-auto z-10 my-auto flex flex-col gap-6">
@@ -142,7 +157,7 @@ export default function LandingPage() {
       {/* ------------------------------------------------------------------ */}
       {/* SECTION 2: THE PROBLEM                                             */}
       {/* ------------------------------------------------------------------ */}
-      <section className="min-h-screen flex flex-col justify-center items-center px-6 py-12 border-b border-border bg-raised/20 relative">
+      <section id="problem" className="min-h-screen flex flex-col justify-center items-center px-6 py-12 border-b border-border bg-raised/20 relative">
         <div className="max-w-4xl mx-auto w-full text-center flex flex-col gap-10">
           <h2 className="font-display text-2xl sm:text-3xl text-primary uppercase tracking-widest">
             Every NPC in every game <br />
@@ -191,7 +206,7 @@ export default function LandingPage() {
       {/* ------------------------------------------------------------------ */}
       {/* SECTION 3: THE SOLUTION                                            */}
       {/* ------------------------------------------------------------------ */}
-      <section className="min-h-screen flex flex-col justify-center px-6 py-16 border-b border-border relative">
+      <section id="solution" className="min-h-screen flex flex-col justify-center px-6 py-16 border-b border-border relative">
         <div className="max-w-6xl mx-auto w-full flex flex-col gap-12">
           <div className="text-center flex flex-col gap-3">
             <h2 className="font-display text-2xl sm:text-3xl text-primary uppercase tracking-widest">
@@ -251,7 +266,7 @@ export default function LandingPage() {
       {/* ------------------------------------------------------------------ */}
       {/* SECTION 4: COGNEE API SURFACE                                       */}
       {/* ------------------------------------------------------------------ */}
-      <section className="py-16 border-b border-border bg-raised/10 px-6">
+      <section id="api" className="py-16 border-b border-border bg-raised/10 px-6">
         <div className="max-w-5xl mx-auto w-full flex flex-col gap-8">
           <div className="flex flex-col gap-2">
             <h2 className="font-display text-xl text-primary uppercase tracking-widest">
@@ -317,7 +332,7 @@ export default function LandingPage() {
       {/* ------------------------------------------------------------------ */}
       {/* SECTION 5: MEET THE NPCS                                           */}
       {/* ------------------------------------------------------------------ */}
-      <section className="min-h-screen flex flex-col justify-center px-6 py-16 border-b border-border relative">
+      <section id="npcs" className="min-h-screen flex flex-col justify-center px-6 py-16 border-b border-border relative">
         <div className="max-w-5xl mx-auto w-full flex flex-col gap-10">
           <div className="text-center">
             <h2 className="font-display text-2xl text-primary uppercase tracking-widest">
@@ -405,7 +420,7 @@ export default function LandingPage() {
       {/* ------------------------------------------------------------------ */}
       {/* SECTION 6: CTA                                                     */}
       {/* ------------------------------------------------------------------ */}
-      <section className="h-[50vh] flex flex-col justify-center items-center px-6 relative text-center">
+      <section id="cta" className="h-[50vh] flex flex-col justify-center items-center px-6 relative text-center">
         <ParticleField />
         <div className="max-w-2xl mx-auto w-full z-10 flex flex-col gap-5 items-center">
           <h2 className="font-decorative text-2xl sm:text-3xl text-purple-glow tracking-wider uppercase leading-tight header-glow">
