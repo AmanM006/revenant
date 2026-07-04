@@ -46,7 +46,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${cinzel.variable} ${cinzelDecorative.variable} ${inter.variable} ${jetbrainsMono.variable}`}>
-      <body className="bg-base text-text antialiased min-h-screen overflow-hidden">
+      <body className="bg-base text-text antialiased min-h-screen">
         {children}
       </body>
     </html>

@@ -124,7 +124,7 @@ export function NPCPanel({ npcs, selectedNpc, onSelect }: Props) {
             id={`npc-btn-${npc.id}`}
             onClick={() => onSelect(npc.id)}
             className={`
-              w-full text-left rounded-xl p-3 border transition-all duration-300 relative overflow-hidden
+              w-full text-left rounded-xl p-3 border transition-all duration-300 relative overflow-hidden shrink-0
               ${
                 isSelected
                   ? "border-purple bg-raised shadow-[0_0_20px_rgba(124,58,237,0.15)] border-l-[3px] border-l-purple-glow"
