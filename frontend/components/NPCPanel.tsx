@@ -20,6 +20,7 @@ interface NpcData {
 interface Props {
   npcs: NpcData[];
   selectedNpc: NpcId;
+  loadingNpc?: string | null;
   onSelect: (id: NpcId) => void;
 }
 
@@ -106,7 +107,7 @@ function trajectoryDisplay(t: Trajectory): { label: string; className: string } 
   }
 }
 
-export function NPCPanel({ npcs, selectedNpc, onSelect }: Props) {
+export function NPCPanel({ npcs, selectedNpc, loadingNpc, onSelect }: Props) {
   return (
     <div className="flex flex-col gap-3 h-full overflow-y-auto pr-1">
       <h2 className="text-xs font-display tracking-widest text-muted uppercase font-semibold mb-1 px-1">
@@ -138,7 +139,9 @@ export function NPCPanel({ npcs, selectedNpc, onSelect }: Props) {
             <div className="absolute -right-6 -bottom-6 w-20 h-20 rounded-full bg-purple/5 blur-xl pointer-events-none" />
 
             {/* Portrait area */}
-            <div className="relative aspect-video w-full rounded-lg overflow-hidden mb-3 border border-border bg-void">
+            <div className={`relative aspect-video w-full rounded-lg overflow-hidden mb-3 border bg-void transition-all duration-300 ${
+              loadingNpc === npc.id ? "border-purple ring-2 ring-purple/50 animate-pulse" : "border-border"
+            }`}>
               <PortraitComponent id={npc.id} />
               {/* Runic border overlay */}
               <RunicBorder trust={npc.trust} />

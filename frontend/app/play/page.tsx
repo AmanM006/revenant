@@ -7,7 +7,6 @@ import {
   getWorldState,
   getTrustTimeline,
   initWorld,
-  sendDialogue,
   timeSkip,
   triggerRumorMill,
 } from "@/lib/api";
@@ -23,6 +22,7 @@ import type {
   GraphLink,
   GraphNode,
   NpcId,
+  NpcAction,
   TrustHistoryEntry,
 } from "@/lib/types";
 
@@ -73,6 +73,19 @@ export default function PlayPage() {
     kael: [],
   });
   const [isThinking, setIsThinking] = useState(false);
+  const [loadingNpc, setLoadingNpc] = useState<NpcId | null>(null);
+  const [streamingText, setStreamingText] = useState("");
+  const [thinkingStep, setThinkingStep] = useState("");
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    // Cancel in-flight stream on NPC switch
+    abortControllerRef.current?.abort();
+    setIsThinking(false);
+    setStreamingText("");
+    setThinkingStep("");
+    setLoadingNpc(null);
+  }, [selectedNpc]);
 
   // Graph
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
@@ -186,7 +199,17 @@ export default function PlayPage() {
   // Dialogue
   // ---------------------------------------------------------------------------
   async function handleSend(message: string) {
-    if (!worldId || isThinking) return;
+    if (!worldId) return;
+
+    // Cancel any in-flight request
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = new AbortController();
+
+    const activeNpc = selectedNpc;
+    setLoadingNpc(activeNpc);
+    setIsThinking(true);
+    setThinkingStep("Querying memory graph...");
+    setStreamingText("");
 
     const playerMsg: ChatMessage = {
       id: `player-${Date.now()}`,
@@ -196,40 +219,86 @@ export default function PlayPage() {
     };
     setMessages((prev) => ({
       ...prev,
-      [selectedNpc]: [...prev[selectedNpc], playerMsg],
+      [activeNpc]: [...prev[activeNpc], playerMsg],
     }));
-    setIsThinking(true);
 
     try {
-      const result = await sendDialogue(selectedNpc, message);
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/dialogue/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ npc_id: activeNpc, message, world_id: worldId }),
+        signal: abortControllerRef.current.signal,
+      });
 
-      const npcMsg: ChatMessage = {
-        id: `npc-${Date.now()}`,
-        sender: selectedNpc,
-        text: result.response,
-        citations: result.citations,
-        provenance_chain: result.provenance_chain ?? undefined,
-        trust_delta: result.trust_delta,
-        action: result.action,
-        timestamp: Date.now(),
-      };
-      setMessages((prev) => ({
-        ...prev,
-        [selectedNpc]: [...prev[selectedNpc], npcMsg],
-      }));
+      if (!response.body) return;
 
-      setTrust((prev) => ({ ...prev, [selectedNpc]: result.new_trust }));
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalDialogue = "";
+      let finalDelta = 0;
+      let finalAction = "none";
 
-      // Refresh history
-      const tl = await getTrustTimeline(selectedNpc);
-      setHistories((prev) => ({ ...prev, [selectedNpc]: tl.history }));
-      setTrajectories((prev) => ({ ...prev, [selectedNpc]: tl.trajectory }));
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      showToast(`Dialogue error: ${msg}`, "error");
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+
+            if (data.type === "status") {
+              setThinkingStep(data.label);
+            } else if (data.type === "chunk") {
+              setStreamingText(data.text);
+              setIsThinking(false);
+            } else if (data.type === "done") {
+              finalDialogue = data.dialogue;
+              finalDelta = data.trust_delta;
+              finalAction = data.action;
+              setStreamingText("");
+              setIsThinking(false);
+
+              const npcMsg: ChatMessage = {
+                id: `npc-${Date.now()}`,
+                sender: activeNpc,
+                text: finalDialogue,
+                trust_delta: finalDelta,
+                action: finalAction as NpcAction,
+                timestamp: Date.now(),
+              };
+              setMessages((prev) => ({
+                ...prev,
+                [activeNpc]: [...prev[activeNpc], npcMsg],
+              }));
+
+              setTrust((prev) => {
+                const nextScore = Math.max(0, Math.min(100, prev[activeNpc] + finalDelta));
+                return { ...prev, [activeNpc]: nextScore };
+              });
+
+              // Refresh histories
+              getTrustTimeline(activeNpc).then((tl) => {
+                setHistories((prev) => ({ ...prev, [activeNpc]: tl.history }));
+                setTrajectories((prev) => ({ ...prev, [activeNpc]: tl.trajectory }));
+              });
+            }
+          } catch {}
+        }
+      }
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name !== "AbortError") {
+        showToast(`Dialogue error: ${err.message}`, "error");
+      }
     } finally {
       setIsThinking(false);
+      setLoadingNpc(null);
+      setStreamingText("");
     }
   }
 
@@ -370,6 +439,7 @@ export default function PlayPage() {
           <NPCPanel
             npcs={npcPanelData}
             selectedNpc={selectedNpc}
+            loadingNpc={loadingNpc}
             onSelect={setSelectedNpc}
           />
         </div>
@@ -382,6 +452,8 @@ export default function PlayPage() {
             messages={messages[selectedNpc]}
             trust={trust[selectedNpc]}
             isThinking={isThinking}
+            thinkingStep={thinkingStep}
+            streamingText={streamingText}
             onSend={handleSend}
           />
         </div>

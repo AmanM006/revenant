@@ -57,92 +57,23 @@ PROVENANCE_TRIGGERS = [
 
 
 # ---------------------------------------------------------------------------
-# Dialogue loop
+# Standalone Prompt Builder
 # ---------------------------------------------------------------------------
 
-async def process_dialogue(
-    npc_id: str,
+def _build_system_prompt(
+    npc: Any,
+    trust: int,
+    trajectory: str,
+    game_day: int,
+    recall_result: Any,
     player_message: str,
     world_id: str,
-    ws_manager=None,
-) -> DialogueResponse:
-    """
-    Full NPC dialogue loop:
-    1. recall() with GRAPH_COMPLETION for deep context
-    2. Detect provenance query → second multi-hop recall()
-    3. Build NPC system prompt
-    4. Generate response via Gemini JSON mode
-    5. remember() all 4 typed entries (qa, trace, feedback, skill_run)
-    6. Auto-trigger rumor mill every 3 turns
-    """
-    dataset_name = f"world_{world_id}"
-    session_id = get_session_id(world_id, npc_id)
-    ts = int(time.time())
-    npc = NPC_DEFINITIONS[npc_id]
-    trust = get_trust(world_id, npc_id)
-    trajectory = get_trust_trajectory(world_id, npc_id)
-    turn_count = increment_turn(world_id, npc_id)
-    game_day = get_game_day(world_id)
-
-    # ----------------------------------------------------------------
-    # STEP 1: recall() — GRAPH_COMPLETION for deep context
-    # ----------------------------------------------------------------
-    try:
-        recall_result = await cognee.recall(
-            query=(
-                f"What do I know about the player? "
-                f"What have I heard from other NPCs? "
-                f"What recent events involved the player? "
-                f"Any rumors, trust changes, or crimes?"
-            ),
-            dataset_name=dataset_name,
-            session_id=session_id,
-            graph_traversal=True,
-        )
-    except Exception as e:
-        logger.warning(f"recall() failed for {npc_id}, continuing with empty context: {e}")
-        from backend.schemas import RecallResult
-        recall_result = RecallResult()
-
-    # ----------------------------------------------------------------
-    # STEP 2: Check for provenance query → multi-hop chain
-    # ----------------------------------------------------------------
-    provenance_chain: Optional[list[dict[str, Any]]] = None
+    provenance_chain: Optional[list[dict[str, Any]]] = None,
+) -> str:
+    """Builds a structured system prompt for the NPC."""
     message_lower = player_message.lower()
     is_provenance_query = any(trigger in message_lower for trigger in PROVENANCE_TRIGGERS)
 
-    if is_provenance_query:
-        logger.info(f"Provenance query detected for {npc_id}: '{player_message}'")
-        try:
-            prov_result = await cognee.recall(
-                query=(
-                    f"Who is the original source of information about the player being "
-                    f"untrustworthy, a thief, or a criminal? "
-                    f"Trace the complete information propagation path from origin to {npc_id}. "
-                    f"Show the chain: player action → NPC reaction → rumor → target NPC."
-                ),
-                dataset_name=dataset_name,
-                graph_traversal=True,
-            )
-            provenance_chain = [
-                {
-                    "step": i + 1,
-                    "document_id": item.get("document_id") or item.get("dataset_id") or f"node_{i}",
-                    "type": item.get("kind", item.get("search_type", "graph_completion")),
-                    "content_preview": str(
-                        item.get("text", item.get("raw", {}).get("value", ""))
-                    )[:60],
-                    "timestamp": str(item.get("metadata", {}).get("timestamp", "")),
-                }
-                for i, item in enumerate(prov_result.nodes[:5])
-                if isinstance(item, dict)
-            ]
-        except Exception as e:
-            logger.warning(f"Provenance recall failed: {e}")
-
-    # ----------------------------------------------------------------
-    # STEP 3: Build NPC system prompt
-    # ----------------------------------------------------------------
     trust_label = (
         "CRITICALLY LOW — be hostile, refuse help"
         if trust < 20
@@ -177,7 +108,7 @@ async def process_dialogue(
         )
 
     # Load rolling conversation history (last 6 turns)
-    history = get_conversation_history(world_id, npc_id)
+    history = get_conversation_history(world_id, npc.id)
     history_block = ""
     if history:
         lines = []
@@ -209,36 +140,34 @@ RULES:
 5. Provenance query ("who told you?") → trace your source chain naturally in dialogue.
 6. Keep response under 120 words. Be sharp. No asterisks or stage directions."""
 
-    # ----------------------------------------------------------------
-    # STEP 4: Generate NPC response via Gemini
-    # ----------------------------------------------------------------
-    try:
-        if is_provenance_query and provenance_chain:
-            response_text = await generate_provenance_narrative(
-                npc.name, provenance_chain, recall_result.graph_context
-            )
-            trust_delta = 0
-            action = "none"
-        else:
-            response_text, trust_delta, action = await generate_npc_response(
-                system_prompt=system_prompt,
-                player_message=player_message,
-                npc_name=npc.name,
-            )
-    except Exception as e:
-        logger.error(f"LLM call failed for {npc_id}, using fallback: {e}")
-        response_text = f"{npc.name} pauses before responding."
-        trust_delta = 0
-        action = "none"
+    return system_prompt
 
-    # Push this turn to conversation history immediately after response
-    push_conversation_turn(world_id, npc_id, player_message, response_text)
 
-    # ----------------------------------------------------------------
-    # STEP 5: remember() all 4 typed entries + register for amnesia
-    # ----------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Background Memory Saver Helper
+# ---------------------------------------------------------------------------
+
+async def _save_dialogue_memories(
+    npc_id: str,
+    player_message: str,
+    recall_result: Any,
+    world_id: str,
+    session_id: str,
+    trust: int,
+    turn_count: int,
+    game_day: int,
+    response_text: str = "",
+    trust_delta: int = 0,
+    action: str = "none",
+    ws_manager: Any = None,
+) -> int:
+    """Saves Dialogue QA, Trace, Feedback and Skill Run memories into Cognee."""
+    dataset_name = f"world_{world_id}"
     ts = int(time.time())
-    game_day = get_game_day(world_id)
+    npc = NPC_DEFINITIONS[npc_id]
+
+    # Push to conversation history registry
+    push_conversation_turn(world_id, npc_id, player_message, response_text)
 
     # qa: dialogue turn
     qa_doc_id = f"qa_{npc_id}_{ts}"
@@ -251,7 +180,6 @@ RULES:
             dataset_name=dataset_name,
             session_id=session_id,
         )
-        # FIX: Register for amnesia modal
         register_memory(
             world_id, npc_id,
             doc_id=qa_entry_id or qa_doc_id,
@@ -275,7 +203,6 @@ RULES:
             dataset_name=dataset_name,
             session_id=session_id,
         )
-        # Only register traces for significant events (action taken)
         if action != "none":
             register_memory(
                 world_id, npc_id,
@@ -289,7 +216,6 @@ RULES:
 
     # feedback: trust update
     new_trust = update_trust(world_id, npc_id, trust_delta, event="dialogue")
-    now_iso = datetime.now(timezone.utc).isoformat()
     feedback_doc_id = f"feedback_{npc_id}_{ts}"
     if qa_entry_id and trust_delta != 0:
         try:
@@ -300,7 +226,7 @@ RULES:
                 dataset_name=dataset_name,
                 session_id=session_id,
             )
-            if trust_delta < -10:  # Only register significant trust drops
+            if trust_delta < -10:
                 register_memory(
                     world_id, npc_id,
                     doc_id=feedback_doc_id,
@@ -344,14 +270,127 @@ RULES:
             {"type": "trust_update", "npc_id": npc_id, "score": new_trust, "reason": "dialogue"},
         )
 
-    # ----------------------------------------------------------------
-    # STEP 6: Auto-trigger rumor mill every 3 turns
-    # ----------------------------------------------------------------
-    if turn_count % 3 == 0:
-        logger.info(f"Auto-triggering rumor mill at turn {turn_count} (triggered by {npc_id})")
-        asyncio.create_task(
-            trigger_rumor_mill(world_id, triggered_by=npc_id, ws_manager=ws_manager)
+    return new_trust
+
+
+# ---------------------------------------------------------------------------
+# Dialogue loop (Synchronous API fallback / test compatible)
+# ---------------------------------------------------------------------------
+
+async def process_dialogue(
+    npc_id: str,
+    player_message: str,
+    world_id: str,
+    ws_manager=None,
+) -> DialogueResponse:
+    """
+    Full NPC dialogue loop:
+    1. recall() with GRAPH_COMPLETION for deep context
+    2. Detect provenance query → second multi-hop recall()
+    3. Build NPC system prompt
+    4. Generate response via Gemini JSON mode
+    5. remember() all 4 typed entries
+    """
+    dataset_name = f"world_{world_id}"
+    session_id = get_session_id(world_id, npc_id)
+    npc = NPC_DEFINITIONS[npc_id]
+    trust = get_trust(world_id, npc_id)
+    trajectory = get_trust_trajectory(world_id, npc_id)
+    turn_count = increment_turn(world_id, npc_id)
+    game_day = get_game_day(world_id)
+
+    # 1. recall()
+    try:
+        recall_result = await cognee.recall(
+            query=(
+                f"What do I know about the player? "
+                f"What have I heard from other NPCs? "
+                f"What recent events involved the player? "
+                f"Any rumors, trust changes, or crimes?"
+            ),
+            dataset_name=dataset_name,
+            session_id=session_id,
+            graph_traversal=True,
         )
+    except Exception as e:
+        logger.warning(f"recall() failed for {npc_id}, continuing with empty context: {e}")
+        from backend.schemas import RecallResult
+        recall_result = RecallResult()
+
+    # 2. provenance query check
+    provenance_chain: Optional[list[dict[str, Any]]] = None
+    message_lower = player_message.lower()
+    is_provenance_query = any(trigger in message_lower for trigger in PROVENANCE_TRIGGERS)
+
+    if is_provenance_query:
+        logger.info(f"Provenance query detected for {npc_id}: '{player_message}'")
+        try:
+            prov_result = await cognee.recall(
+                query=(
+                    f"Who is the original source of information about the player being "
+                    f"untrustworthy, a thief, or a criminal? "
+                    f"Trace the complete information propagation path from origin to {npc_id}. "
+                    f"Show the chain: player action → NPC reaction → rumor → target NPC."
+                ),
+                dataset_name=dataset_name,
+                graph_traversal=True,
+            )
+            provenance_chain = [
+                {
+                    "step": i + 1,
+                    "document_id": item.get("document_id") or item.get("dataset_id") or f"node_{i}",
+                    "type": item.get("kind", item.get("search_type", "graph_completion")),
+                    "content_preview": str(
+                        item.get("text", item.get("raw", {}).get("value", ""))
+                    )[:60],
+                    "timestamp": str(item.get("metadata", {}).get("timestamp", "")),
+                }
+                for i, item in enumerate(prov_result.nodes[:5])
+                if isinstance(item, dict)
+            ]
+        except Exception as e:
+            logger.warning(f"Provenance recall failed: {e}")
+
+    # 3. Build NPC system prompt
+    system_prompt = _build_system_prompt(
+        npc, trust, trajectory, game_day, recall_result, player_message, world_id, provenance_chain
+    )
+
+    # 4. Generate NPC response via Gemini
+    try:
+        if is_provenance_query and provenance_chain:
+            response_text = await generate_provenance_narrative(
+                npc.name, provenance_chain, recall_result.graph_context
+            )
+            trust_delta = 0
+            action = "none"
+        else:
+            response_text, trust_delta, action = await generate_npc_response(
+                system_prompt=system_prompt,
+                player_message=player_message,
+                npc_name=npc.name,
+            )
+    except Exception as e:
+        logger.error(f"LLM call failed for {npc_id}, using fallback: {e}")
+        response_text = f"{npc.name} pauses before responding."
+        trust_delta = 0
+        action = "none"
+
+    # 5. remember() and save memories (waits synchronously)
+    new_trust = await _save_dialogue_memories(
+        npc_id=npc_id,
+        player_message=player_message,
+        recall_result=recall_result,
+        world_id=world_id,
+        session_id=session_id,
+        trust=trust,
+        turn_count=turn_count,
+        game_day=game_day,
+        response_text=response_text,
+        trust_delta=trust_delta,
+        action=action,
+        ws_manager=ws_manager,
+    )
 
     return DialogueResponse(
         response=response_text,
@@ -496,7 +535,7 @@ async def cast_amnesia(
 
     remaining_gold = deduct_gold(world_id, 50)
 
-    result = await cognee.forget_document(dataset_name, document_id)
+    await cognee.forget_document(dataset_name, document_id)
     remove_memory(world_id, npc_id, document_id)
 
     try:

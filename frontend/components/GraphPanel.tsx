@@ -4,6 +4,7 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { GraphData, GraphNode, GraphLink } from "@/lib/types";
+import { RumorToast } from "./RumorToast";
 
 // Dynamic import — ForceGraph2D is canvas-based, no SSR
 const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), { ssr: false });
@@ -148,7 +149,9 @@ export function GraphPanel({ graphData, dissolvingNodes, pulsatingEdges }: Props
           nodeRelSize={6}
           linkColor={(link) => {
             const l = link as GraphLink;
-            return l.edgeType === "rumor" ? "#F97316" : l.edgeType === "trust" ? "#10B981" : "#1E2A45";
+            if (l.edgeType === "rumor") return "rgba(180, 100, 20, 0.6)"; // deep amber, NOT bright orange
+            if (l.edgeType === "trust") return "rgba(16, 185, 129, 0.4)"; // muted green
+            return "rgba(30, 42, 69, 0.8)"; // near-invisible default
           }}
           linkWidth={(link) => {
             const l = link as GraphLink;
@@ -158,21 +161,13 @@ export function GraphPanel({ graphData, dissolvingNodes, pulsatingEdges }: Props
             const l = link as GraphLink;
             return l.edgeType === "rumor" ? 4 : 0;
           }}
-          linkDirectionalParticleColor={() => "#F97316"}
+          linkDirectionalParticleColor={() => "rgba(180, 100, 20, 0.8)"}
           linkDirectionalParticleSpeed={0.005}
           cooldownTicks={100}
         />
 
-        {/* Rumor Flash Overlay */}
-        <div
-          className={`absolute inset-0 bg-orange-500/10 pointer-events-none z-30 flex items-start justify-center pt-8 transition-opacity duration-500 ${
-            showFlash ? "opacity-100" : "opacity-0"
-          }`}
-        >
-          <div className="bg-void/90 border border-orange text-orange font-display tracking-widest text-[11px] font-bold px-4 py-1.5 rounded-full shadow-lg shadow-orange/20 animate-pulse">
-            ⚡ RUMOR PROPAGATING
-          </div>
-        </div>
+        {/* Rumor Toast Notification (replaces current rumor notification) */}
+        <RumorToast visible={showFlash} onDismiss={() => setShowFlash(false)} />
 
         {graphData.nodes.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center">
@@ -200,17 +195,17 @@ export function GraphPanel({ graphData, dissolvingNodes, pulsatingEdges }: Props
             <span className="text-[10px] font-mono text-secondary">Event</span>
           </div>
           <div className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-orange" />
+            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgba(180, 100, 20, 0.9)" }} />
             <span className="text-[10px] font-mono text-secondary">Rumor</span>
           </div>
         </div>
         <div className="flex gap-x-2.5 items-center">
           <div className="flex items-center gap-1">
-            <span className="w-3 border-t border-green" />
+            <span className="w-3 border-t border-[#10B981]" />
             <span className="text-[10px] font-mono text-secondary">Trust</span>
           </div>
           <div className="flex items-center gap-1">
-            <span className="w-3 border-t border-orange border-dashed" />
+            <span className="w-3 border-t border-dashed" style={{ borderColor: "rgba(180, 100, 20, 0.9)" }} />
             <span className="text-[10px] font-mono text-secondary">Rumor</span>
           </div>
         </div>

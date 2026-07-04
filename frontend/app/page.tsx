@@ -2,6 +2,8 @@
 // app/page.tsx — Hero landing page for Revenant
 
 import Link from "next/link";
+import { useEffect } from "react";
+import Lenis from "@studio-freight/lenis";
 import { Silas } from "@/components/portraits/Silas";
 import { Elara } from "@/components/portraits/Elara";
 import { Kael } from "@/components/portraits/Kael";
@@ -36,22 +38,41 @@ function ParticleField() {
 }
 
 export default function LandingPage() {
+  useEffect(() => {
+    const lenis = new Lenis({
+      duration: 1.2,
+      easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+      smoothWheel: true,
+    });
+
+    function raf(time: number) {
+      lenis.raf(time);
+      requestAnimationFrame(raf);
+    }
+    requestAnimationFrame(raf);
+
+    return () => lenis.destroy();
+  }, []);
+
   return (
-    <div className="min-h-screen bg-void text-primary overflow-y-auto selection:bg-purple/30 font-body scroll-smooth">
+    <div className="min-h-screen bg-void text-primary selection:bg-purple/30 font-body scroll-smooth">
       {/* ------------------------------------------------------------------ */}
       {/* SECTION 1: HERO HEADER & ABOVE FOLD                                 */}
       {/* ------------------------------------------------------------------ */}
       <section className="min-h-screen flex flex-col relative justify-between px-6 py-6 border-b border-border">
         <ParticleField />
         
-        {/* Header */}
-        <header className="flex items-center justify-between max-w-6xl mx-auto w-full z-10">
-          <h1 className="font-decorative text-xl text-purple-glow tracking-[0.2em] header-glow uppercase">
-            REVENANT
-          </h1>
+        {/* Header containing ONLY the top-right plain text link */}
+        <header className="flex justify-end max-w-6xl mx-auto w-full z-10">
           <Link
             href="/play"
-            className="font-display text-xs uppercase tracking-widest border border-purple hover:bg-purple-dim/30 hover:text-purple-glow px-4 py-2 rounded transition-all duration-200"
+            className="hover:text-purple-glow transition-colors cursor-pointer uppercase font-semibold"
+            style={{
+              fontFamily: "Cinzel",
+              fontSize: "13px",
+              letterSpacing: "0.15em",
+              color: "var(--text-secondary)",
+            }}
           >
             Enter World
           </Link>
@@ -130,27 +151,29 @@ export default function LandingPage() {
 
           {/* Cards comparison */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-left max-w-2xl mx-auto w-full">
-            <div className="border border-border bg-surface rounded-xl p-5 shadow-lg flex flex-col gap-3">
-              <span className="font-mono text-[10px] text-muted uppercase tracking-widest">Session 1</span>
-              <p className="font-body text-xs text-secondary leading-relaxed">
-                <span className="text-amber font-semibold">You:</span> &quot;I helped defend the village.&quot;
-              </p>
-              <p className="font-body text-xs text-purple-glow leading-relaxed">
-                <span className="text-purple-glow font-semibold">Guard:</span> &quot;You are a true hero.&quot;
-              </p>
+            <div className="session-card">
+              <div className="session-label">SESSION 1</div>
+              <div className="session-line">
+                <span className="speaker">You</span>
+                <span className="line">&quot;I helped defend the village.&quot;</span>
+              </div>
+              <div className="session-line">
+                <span className="speaker">Guard</span>
+                <span className="line">&quot;You are a true hero.&quot;</span>
+              </div>
             </div>
 
-            <div className="border border-border bg-surface rounded-xl p-5 shadow-lg flex flex-col gap-3">
-              <span className="font-mono text-[10px] text-muted uppercase tracking-widest">Session 2</span>
-              <p className="font-body text-xs text-secondary leading-relaxed">
-                <span className="text-amber font-semibold">You:</span> &quot;I need entry to the keep.&quot;
-              </p>
-              <p className="font-body text-xs text-secondary/65 leading-relaxed">
-                <span className="text-red font-semibold">Guard:</span> &quot;Halt, stranger. State your business.&quot;
-              </p>
-              <div className="mt-auto border-t border-border/40 pt-2 text-[9px] font-mono text-red/60 uppercase">
-                [No memory. Eternal reset.]
+            <div className="session-card session-card--dead">
+              <div className="session-label">SESSION 2</div>
+              <div className="session-line">
+                <span className="speaker">You</span>
+                <span className="line">&quot;I need entry to the keep.&quot;</span>
               </div>
+              <div className="session-line">
+                <span className="speaker">Guard</span>
+                <span className="line">&quot;Halt, stranger. State your business.&quot;</span>
+              </div>
+              <div className="session-dead-badge">NO MEMORY. ETERNAL RESET.</div>
             </div>
           </div>
 

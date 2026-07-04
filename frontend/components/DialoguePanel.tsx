@@ -1,5 +1,5 @@
 "use client";
-// components/DialoguePanel.tsx — Overhauled chat panel with custom speech bubbles and tree-styled citation log
+// components/DialoguePanel.tsx — Overhauled chat panel with streaming message rendering, progress step logs, and proper custom SVGs
 
 import { useEffect, useRef, useState } from "react";
 import { CitationLog } from "./CitationLog";
@@ -14,6 +14,8 @@ interface Props {
   messages: ChatMessage[];
   trust: number;
   isThinking: boolean;
+  thinkingStep: string;
+  streamingText: string;
   onSend: (message: string) => void;
 }
 
@@ -35,18 +37,27 @@ const QUICK_ACTIONS: Array<{ label: string; value: string }> = [
   { label: "I'm innocent!", value: "I'm innocent. You've been misled about me." },
 ];
 
-export function DialoguePanel({ npcId, npcName, messages, trust, isThinking, onSend }: Props) {
+export function DialoguePanel({
+  npcId,
+  npcName,
+  messages,
+  trust,
+  isThinking,
+  thinkingStep,
+  streamingText,
+  onSend,
+}: Props) {
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isThinking]);
+  }, [messages, isThinking, streamingText]);
 
   function handleSend() {
     const text = input.trim();
-    if (!text || isThinking) return;
+    if (!text || isThinking || streamingText) return;
     onSend(text);
     setInput("");
     inputRef.current?.focus();
@@ -88,7 +99,7 @@ export function DialoguePanel({ npcId, npcName, messages, trust, isThinking, onS
 
       {/* Message List */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0 bg-void/30">
-        {messages.length === 0 && (
+        {messages.length === 0 && !streamingText && !isThinking && (
           <div className="text-center text-muted text-xs mt-12 font-mono max-w-xs mx-auto leading-relaxed border border-border/20 rounded-lg p-4 bg-void/50">
             📖 You stand before {npcName}. Speak with honor, or tread carefully. Their memory is absolute.
           </div>
@@ -150,18 +161,32 @@ export function DialoguePanel({ npcId, npcName, messages, trust, isThinking, onS
           );
         })}
 
-        {/* Typing indicator */}
-        {isThinking && (
-          <div className="flex flex-col items-start">
+        {/* Streaming text bubble */}
+        {streamingText && (
+          <div className="flex flex-col items-start animate-fade-in">
             <span className="font-display text-[10px] text-purple-glow tracking-wider mb-1 ml-2">
               {npcName.toUpperCase()}
             </span>
-            <div className="bg-surface border border-border px-4 py-3 rounded-xl rounded-tl-none border-l-2 border-l-purple">
-              <div className="flex gap-1.5 items-center h-2">
-                <span className="w-1.5 h-1.5 bg-purple rounded-full animate-bounce [animation-delay:0ms]" />
-                <span className="w-1.5 h-1.5 bg-purple rounded-full animate-bounce [animation-delay:150ms]" />
-                <span className="w-1.5 h-1.5 bg-purple rounded-full animate-bounce [animation-delay:300ms]" />
+            <div className="npc-bubble streaming px-4 py-2.5 rounded-xl text-[14px] font-body leading-relaxed max-w-[80%] bg-surface border border-border text-primary rounded-tl-none border-l-2 border-l-purple shadow-sm">
+              {streamingText}
+              <span className="cursor-blink ml-1 text-purple-glow animate-pulse">▊</span>
+            </div>
+          </div>
+        )}
+
+        {/* Step-by-step thinking indicator */}
+        {isThinking && (
+          <div className="flex flex-col items-start thinking-indicator">
+            <span className="font-display text-[10px] text-purple-glow tracking-wider mb-1 ml-2">
+              {npcName.toUpperCase()}
+            </span>
+            <div className="bg-surface border border-border px-4 py-3 rounded-xl rounded-tl-none border-l-2 border-l-purple flex items-center gap-3">
+              <div className="thinking-dots flex gap-1 items-center">
+                <span className="w-1.5 h-1.5 bg-purple rounded-full animate-pulse-stagger" style={{ animationDelay: "0s" }} />
+                <span className="w-1.5 h-1.5 bg-purple rounded-full animate-pulse-stagger" style={{ animationDelay: "0.4s" }} />
+                <span className="w-1.5 h-1.5 bg-purple rounded-full animate-pulse-stagger" style={{ animationDelay: "0.8s" }} />
               </div>
+              <span className="thinking-step text-xs font-mono text-secondary">{thinkingStep}</span>
             </div>
           </div>
         )}
@@ -178,7 +203,7 @@ export function DialoguePanel({ npcId, npcName, messages, trust, isThinking, onS
           <button
             key={qa.label}
             onClick={() => onSend(qa.value)}
-            disabled={isThinking}
+            disabled={isThinking || !!streamingText}
             className="text-[11px] font-body px-2.5 py-1 rounded border border-border text-secondary hover:text-primary hover:border-bright hover:bg-hover transition-all duration-150 disabled:opacity-40"
           >
             {qa.label}
@@ -195,7 +220,7 @@ export function DialoguePanel({ npcId, npcName, messages, trust, isThinking, onS
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKey}
-          disabled={isThinking}
+          disabled={isThinking || !!streamingText}
           placeholder={`Speak to ${npcName}...`}
           className="
             flex-1 bg-void border border-border rounded-lg px-3 py-2 text-[14px] text-primary
@@ -206,7 +231,7 @@ export function DialoguePanel({ npcId, npcName, messages, trust, isThinking, onS
         <button
           id="dialogue-send"
           onClick={handleSend}
-          disabled={isThinking || !input.trim()}
+          disabled={isThinking || !!streamingText || !input.trim()}
           className="
             px-5 py-2 bg-purple hover:bg-purple-glow text-white text-xs font-display tracking-wider uppercase rounded-lg transition-all duration-200 disabled:opacity-40
           "

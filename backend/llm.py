@@ -118,7 +118,68 @@ async def generate_npc_response(
     return _fallback(npc_name)
 
 
+async def stream_npc_response(
+    system_prompt: str,
+    player_message: str,
+    npc_name: str,
+):
+    """
+    Yields text chunks as Gemini generates them.
+    Used by /dialogue/stream SSE endpoint.
+    Final yield is JSON with trust_delta and action.
+    """
+    contents = (
+        f"{system_prompt}\n\n"
+        f'Player says: "{player_message}"\n\n'
+        "Respond with ONLY a JSON object. Keep dialogue under 80 words."
+    )
+
+    for model_name in MODELS:
+        try:
+            full_text = ""
+            # Use streaming
+            for chunk in _client.models.generate_content_stream(
+                model=model_name,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=_SYSTEM,
+                    temperature=0.85,
+                    max_output_tokens=1500,
+                ),
+            ):
+                if chunk.text:
+                    full_text += chunk.text
+                    # Yield dialogue text as it streams
+                    # Try to extract partial dialogue from accumulating text
+                    partial = _extract_streaming_dialogue(full_text)
+                    if partial:
+                        yield {"type": "chunk", "text": partial}
+
+            # Final: parse full JSON and yield structured result
+            result = _parse_response(full_text, npc_name, model_name)
+            if result:
+                dialogue, delta, action = result
+                yield {"type": "done", "dialogue": dialogue, "trust_delta": delta, "action": action}
+                return
+        except Exception as e:
+            logger.warning(f"Streaming failed on {model_name}: {e}")
+            continue
+
+    yield {"type": "done", "dialogue": f"{npc_name} nods slowly.", "trust_delta": 0, "action": "none"}
+
+
+def _extract_streaming_dialogue(partial_text: str) -> str:
+    """Extract partial dialogue string from accumulating JSON."""
+    import re
+    # Look for dialogue field being built
+    match = re.search(r'"dialogue"\s*:\s*"([^"]{10,})', partial_text)
+    if match:
+        return match.group(1).rstrip('\\')
+    return ""
+
+
 def _parse_response(text: Optional[str], npc_name: str, model: str) -> Optional[tuple[str, int, str]]:
+
     """
     Extract JSON from model output.
     Attempts partial recovery for truncated responses.

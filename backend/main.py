@@ -13,10 +13,12 @@ from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+import json
 
 from backend.cognee_client import cognee
-from backend.npc_engine import cast_amnesia, process_action, process_dialogue
+from backend.npc_engine import cast_amnesia, process_action, process_dialogue, _build_system_prompt, _save_dialogue_memories
 from backend.rumor_mill import trigger_rumor_mill
 from backend.schemas import (
     ActionRequest,
@@ -227,6 +229,93 @@ async def dialogue(body: DialogueRequest) -> dict:
     except Exception as e:
         logger.error(f"Dialogue error for {body.npc_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/dialogue/stream")
+async def dialogue_stream(body: DialogueRequest):
+    """
+    Server-Sent Events endpoint for streaming NPC responses.
+    Client sees text appearing word by word instead of waiting 30s.
+    """
+    require_world(body.world_id)
+
+    async def event_generator():
+        # Step 1: Emit thinking status immediately
+        yield f"data: {json.dumps({'type': 'status', 'step': 'querying_graph', 'label': 'Querying memory graph...'})}\n\n"
+
+        # Step 2: Run recall() — this is the slow part (15-25s)
+        dataset_name = f"world_{body.world_id}"
+        npc = NPC_DEFINITIONS.get(body.npc_id)
+        if not npc:
+            yield f"data: {json.dumps({'type': 'error', 'message': 'NPC not found'})}\n\n"
+            return
+
+        from backend.world_state import get_session_id, get_trust, get_trust_trajectory, increment_turn, get_game_day
+        session_id = get_session_id(body.world_id, body.npc_id)
+        trust = get_trust(body.world_id, body.npc_id)
+        trajectory = get_trust_trajectory(body.world_id, body.npc_id)
+        turn_count = increment_turn(body.world_id, body.npc_id)
+        game_day = get_game_day(body.world_id)
+
+        try:
+            recall_result = await cognee.recall(
+                query="What do I know about the player? What have I heard from others? Any trust changes?",
+                dataset_name=dataset_name,
+                session_id=session_id,
+                graph_traversal=True,
+            )
+        except Exception:
+            from backend.schemas import RecallResult
+            recall_result = RecallResult()
+
+        yield f"data: {json.dumps({'type': 'status', 'step': 'generating', 'label': 'Forming response...'})}\n\n"
+
+        # Step 3: Build prompt and stream Gemini
+        system_prompt = _build_system_prompt(npc, trust, trajectory, game_day, recall_result, body.message, body.world_id)
+
+        from backend.llm import stream_npc_response
+        final_dialogue = ""
+        final_delta = 0
+        final_action = "none"
+
+        try:
+            async for chunk in stream_npc_response(system_prompt, body.message, npc.name):
+                if chunk["type"] == "done":
+                    final_dialogue = chunk["dialogue"]
+                    final_delta = chunk["trust_delta"]
+                    final_action = chunk["action"]
+                yield f"data: {json.dumps(chunk)}\n\n"
+        except Exception as e:
+            logger.error(f"Gemini streaming generator encountered error: {e}")
+
+        # Step 4: Background — save memories, update trust (fire and forget)
+        import asyncio
+        asyncio.create_task(
+            _save_dialogue_memories(
+                npc_id=body.npc_id,
+                player_message=body.message,
+                recall_result=recall_result,
+                world_id=body.world_id,
+                session_id=session_id,
+                trust=trust,
+                turn_count=turn_count,
+                game_day=game_day,
+                response_text=final_dialogue,
+                trust_delta=final_delta,
+                action=final_action,
+                ws_manager=ws_manager,
+            )
+        )
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
 
 
 # ---------------------------------------------------------------------------

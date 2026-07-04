@@ -1,5 +1,5 @@
 "use client";
-// components/EngineControls.tsx — Arcane console actions bar for rumor mill, amnesia spell, and timeskip
+// components/EngineControls.tsx — Arcane console actions bar with proper SVG icons
 
 interface Props {
   gold: number;
@@ -36,7 +36,6 @@ export function EngineControls({
       >
         {rumorLoading ? (
           <>
-            {/* Spinning Rune SVG */}
             <svg
               className="w-4 h-4 animate-spin text-orange"
               viewBox="0 0 24 24"
@@ -51,21 +50,22 @@ export function EngineControls({
           </>
         ) : (
           <>
-            {/* Network nodes SVG icon */}
+            {/* Network graph SVG */}
             <svg
-              className="w-4 h-4"
-              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              viewBox="0 0 16 16"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+              strokeWidth="1.5"
+              className="w-4 h-4"
             >
-              <circle cx="18" cy="5" r="3" />
-              <circle cx="6" cy="12" r="3" />
-              <circle cx="18" cy="19" r="3" />
-              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
-              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+              <circle cx="8" cy="2" r="1.5" />
+              <circle cx="2" cy="13" r="1.5" />
+              <circle cx="14" cy="13" r="1.5" />
+              <line x1="8" y1="3.5" x2="2" y2="11.5" />
+              <line x1="8" y1="3.5" x2="14" y2="11.5" />
+              <line x1="3.5" y1="13" x2="12.5" y2="13" />
             </svg>
             <span>Trigger Rumor Mill</span>
           </>
@@ -87,18 +87,19 @@ export function EngineControls({
         "
         title={gold < 50 ? "Requires 50 gold" : "Cast Amnesia"}
       >
-        {/* Brain SVG Icon */}
+        {/* Eye with slash SVG */}
         <svg
-          className="w-4 h-4"
-          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          viewBox="0 0 16 16"
           fill="none"
           stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
+          strokeWidth="1.5"
+          className="w-4 h-4"
         >
-          <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.44 2.5 2.5 0 0 1 0-3.12 3 3 0 0 1 0-3.88 2.5 2.5 0 0 1 0-3.12A2.5 2.5 0 0 1 9.5 2Z" />
-          <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.44 2.5 2.5 0 0 0 0-3.12 3 3 0 0 0 0-3.88 2.5 2.5 0 0 0 0-3.12A2.5 2.5 0 0 0 14.5 2Z" />
+          <path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z" />
+          <circle cx="8" cy="8" r="2" />
+          <line x1="2" y1="2" x2="14" y2="14" strokeWidth="1.5" />
         </svg>
         <span>Cast Amnesia</span>
         <span className="text-[10px] font-mono opacity-80">(50g)</span>
@@ -125,20 +126,17 @@ export function EngineControls({
           </>
         ) : (
           <>
-            {/* Hourglass SVG Icon */}
+            {/* Hourglass SVG */}
             <svg
-              className="w-4 h-4"
-              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              viewBox="0 0 16 16"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+              strokeWidth="1.5"
+              className="w-4 h-4"
             >
-              <path d="M5 2h14" />
-              <path d="M5 22h14" />
-              <path d="M19 2v4c0 3.3-2.7 6-6 6h-2c-3.3 0-6-2.7-6-6V2" />
-              <path d="M5 22v-4c0-3.3 2.7-6 6-6h2c3.3 0 6 2.7 6 6v4" />
+              <path d="M4 2h8M4 14h8M5 2v2l3 4-3 4v2M11 2v2L8 8l3 4v2" />
             </svg>
             <span>Time Skip +1 Day</span>
           </>
