@@ -2,7 +2,7 @@
 // app/page.tsx — Hero landing page for Revenant
 
 import Link from "next/link";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import Lenis from "@studio-freight/lenis";
 import { Silas } from "@/components/portraits/Silas";
 import { Elara } from "@/components/portraits/Elara";
@@ -38,12 +38,15 @@ function ParticleField() {
 }
 
 export default function LandingPage() {
+  const lenisRef = useRef<Lenis | null>(null);
+
   useEffect(() => {
     const lenis = new Lenis({
       duration: 1.2,
       easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
       smoothWheel: true,
     });
+    lenisRef.current = lenis;
 
     function raf(time: number) {
       lenis.raf(time);
@@ -54,30 +57,50 @@ export default function LandingPage() {
     return () => lenis.destroy();
   }, []);
 
+  const handleScrollTo = (e: React.MouseEvent<HTMLAnchorElement>, id: string) => {
+    e.preventDefault();
+    const element = document.querySelector(id);
+    if (element && lenisRef.current) {
+      lenisRef.current.scrollTo(element as HTMLElement);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-void text-primary selection:bg-purple/30 font-body scroll-smooth">
-      {/* Sticky Floating Navbar */}
-      <header className="sticky top-0 left-0 right-0 z-50 bg-[#06080F]/85 backdrop-blur-md border-b border-border/40 px-6 py-4 flex items-center justify-between">
+      {/* Fixed Floating Navbar */}
+      <header className="fixed top-0 left-0 right-0 z-50 bg-[#06080F]/85 backdrop-blur-md border-b border-border/40 px-6 py-4 flex items-center justify-between">
         <div className="max-w-6xl mx-auto w-full flex items-center justify-between">
           <Link href="/" className="font-decorative text-sm text-purple-glow tracking-[0.2em] header-glow uppercase">
             REVENANT
           </Link>
           
           <nav className="hidden md:flex items-center gap-8 font-display text-[10px] uppercase tracking-[0.25em] text-secondary">
-            <a href="#hero" className="hover:text-purple-glow transition-colors">Hero</a>
-            <a href="#problem" className="hover:text-purple-glow transition-colors">Problem</a>
-            <a href="#solution" className="hover:text-purple-glow transition-colors">Solution</a>
-            <a href="#api" className="hover:text-purple-glow transition-colors">API Surface</a>
-            <a href="#npcs" className="hover:text-purple-glow transition-colors">NPCs</a>
+            <a
+              href="#problem"
+              onClick={(e) => handleScrollTo(e, "#problem")}
+              className="hover:text-purple-glow transition-colors"
+            >
+              Problem
+            </a>
+            <a
+              href="#solution"
+              onClick={(e) => handleScrollTo(e, "#solution")}
+              className="hover:text-purple-glow transition-colors"
+            >
+              Solution
+            </a>
+            <a
+              href="#api"
+              onClick={(e) => handleScrollTo(e, "#api")}
+              className="hover:text-purple-glow transition-colors"
+            >
+              Architecture
+            </a>
           </nav>
 
           <Link
             href="/play"
-            className="hover:text-purple-glow transition-colors cursor-pointer uppercase font-semibold font-display text-[11px] tracking-[0.15em]"
-            style={{
-              fontFamily: "Cinzel",
-              color: "var(--text-secondary)",
-            }}
+            className="px-4 py-2 bg-purple/20 hover:bg-purple border border-purple/60 hover:border-purple text-primary hover:text-white font-display text-[10px] uppercase tracking-[0.2em] rounded transition-all duration-200 shadow-md hover:shadow-purple/25"
           >
             Enter World
           </Link>
@@ -87,7 +110,7 @@ export default function LandingPage() {
       {/* ------------------------------------------------------------------ */}
       {/* SECTION 1: HERO HEADER & ABOVE FOLD                                 */}
       {/* ------------------------------------------------------------------ */}
-      <section id="hero" className="min-h-screen flex flex-col relative justify-between px-6 py-6 border-b border-border">
+      <section id="hero" className="h-screen flex flex-col relative justify-between px-6 pb-6 pt-[76px] border-b border-border">
         <ParticleField />
         
         {/* Top spacer for vertical alignment */}
@@ -148,10 +171,18 @@ export default function LandingPage() {
         </div>
 
         {/* Scroll Indicator */}
-        <div className="text-center font-mono text-[10px] text-muted tracking-widest uppercase z-10 flex flex-col items-center gap-1.5 animate-pulse">
+        <button
+          onClick={() => {
+            const element = document.querySelector("#problem");
+            if (element && lenisRef.current) {
+              lenisRef.current.scrollTo(element as HTMLElement);
+            }
+          }}
+          className="text-center font-mono text-[10px] text-muted tracking-widest uppercase z-10 flex flex-col items-center gap-1.5 animate-pulse cursor-pointer border-none bg-transparent hover:text-purple-glow transition-colors mx-auto"
+        >
           <span>scroll to explore</span>
           <span>▼</span>
-        </div>
+        </button>
       </section>
 
       {/* ------------------------------------------------------------------ */}
