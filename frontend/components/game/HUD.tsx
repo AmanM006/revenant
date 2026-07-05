@@ -618,6 +618,7 @@ export function HUD() {
               graphData={graphData}
               dissolvingNodes={dissolvingNodes}
               pulsatingEdges={pulsatingEdges}
+              currentGameDay={gameDay}
             />
           </div>
         </div>

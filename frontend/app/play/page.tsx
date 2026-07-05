@@ -536,6 +536,7 @@ export default function PlayPage() {
               graphData={graphData}
               dissolvingNodes={dissolvingNodes}
               pulsatingEdges={pulsatingEdges}
+              currentGameDay={gameDay}
             />
           </div>
         </div>
