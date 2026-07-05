@@ -46,6 +46,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${cinzel.variable} ${cinzelDecorative.variable} ${inter.variable} ${jetbrainsMono.variable}`}>
+      <head>
+        <meta name="darkreader-lock" />
+      </head>
       <body className="bg-base text-text antialiased min-h-screen">
         {children}
       </body>
