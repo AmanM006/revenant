@@ -178,6 +178,26 @@ Every browser tab gets a unique `world_id` stored in `sessionStorage`. This maps
 
 ---
 
+## Cognee Cloud Console: Visualizing the Ontological Architecture
+
+Revenant leverages Cognee Cloud's advanced console to visualize and audit the emergent graph state of our multi-agent world. The database structures memory and interactions into a strict, multi-layered semantic hierarchy:
+
+### 1. Memory Schema (Semantic Extraction Mapping)
+The console's **Memory Schema** tab shows how unstructured text events are parsed, categorized, and linked under `ashenvale_ontology` constraints:
+* **Documents (TEXTDOCUMENT)**: The raw, immutable log entries of dialogues, actions, or skip-day events.
+* **Chunks (DOCUMENTCHUNK)**: Segmented, semantic sentences containing facts or capabilities (e.g., `"Elara can ENCHANT_ITEM..."`, `"Kael is the Captain of the Guard..."`, `"Kael can ARREST_PLAYER..."`).
+* **Entities (CONCEPT / CURRENCYAMOUNT / DOCUMENT)**: Concrete extracted arguments and instances (e.g., Concept: `"illegal enchantments"`, `"forbidden magic"`; CurrencyAmount: `"200 gold"`; Document: `"kaels personal ledger"`).
+* **Types (ENTITYTYPE)**: Schema classes classifying the concepts (e.g., `ability`, `person`, `organization`, `event`, `location`, `document`, `currencyamount`).
+* **Summaries (TEXTSUMMARY)**: High-level summaries mapping chunks back to their parent document.
+
+### 2. Mindmap (Emergent Relational Graph)
+The **Mindmap** view renders a structured, force-directed graph of the entire world state (e.g., **77 nodes**, **196 edges**), organizing nodes into clear visual columns representing the data hierarchy:
+* **Documents column** $\rightarrow$ **Chunks column** $\rightarrow$ **Entities column** $\rightarrow$ **Types column** $\rightarrow$ **Summaries column**.
+* **Edge Semantics**: Edges represent explicit semantic relations (e.g., `contains`, `is_part_of`, `is_a`, `recorded_bribe_amount`, `covers_location`).
+* **Cross-linking**: Select an instance chunk (e.g., `"Elara is the court mage..."`) to trace its connections to entities like `"silass daughter"` or types like `"person"`, showing how Cognee generates multi-hop context for agent reasoning.
+
+---
+
 ## Tech Stack
 
 | Layer | Technology | Why |
