@@ -273,6 +273,20 @@ async def _save_dialogue_memories(
             {"type": "trust_update", "npc_id": npc_id, "score": new_trust, "reason": "dialogue"},
         )
 
+    # Auto-trigger rumor mill if trust drops below 40
+    if new_trust < 40 and trust_delta < 0:
+        logger.info(f"Trust for {npc_id} dropped below 40 ({new_trust}/100) via dialogue. Triggering Rumor Mill...")
+        from backend.rumor_mill import trigger_rumor_mill
+        import asyncio
+        asyncio.create_task(
+            trigger_rumor_mill(
+                world_id=world_id,
+                triggered_by=f"dialogue_betrayal_{npc_id}",
+                ws_manager=ws_manager,
+                manual=False,
+            )
+        )
+
     return new_trust
 
 
@@ -504,6 +518,20 @@ async def process_action(
         await ws_manager.broadcast(
             world_id,
             {"type": "trust_update", "npc_id": npc_id, "score": new_trust, "reason": action_type},
+        )
+
+    # Auto-trigger rumor mill if trust drops below 40
+    if new_trust < 40 and delta < 0:
+        logger.info(f"Trust for {npc_id} dropped below 40 ({new_trust}/100) via action. Triggering Rumor Mill...")
+        from backend.rumor_mill import trigger_rumor_mill
+        import asyncio
+        asyncio.create_task(
+            trigger_rumor_mill(
+                world_id=world_id,
+                triggered_by=f"action_betrayal_{npc_id}",
+                ws_manager=ws_manager,
+                manual=False,
+            )
         )
 
     from backend.world_state import get_trust_history

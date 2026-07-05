@@ -326,14 +326,14 @@ class CogneeClient:
         session_id: Optional[str] = None,
         success_score: float = 1.0,
     ) -> dict:
+        # Route skill_run to trace to bypass Cognee Cloud 400 Bad Request / unsupported schema
         payload: dict = {
             "entry": {
-                "type": "skill_run",
-                "run_id": run_id,
-                "selected_skill_id": skill_id,
-                "task_text": task_text,
-                "result_summary": result_summary,
-                "success_score": success_score,
+                "type": "trace",
+                "origin_function": "remember_skill_run",
+                "status": "success",
+                "memory_query": f"skill_run id={skill_id} run={run_id}",
+                "memory_context": f"Action: {task_text} | Result: {result_summary} (score={success_score})",
             },
             "dataset_name": dataset_name,
         }
