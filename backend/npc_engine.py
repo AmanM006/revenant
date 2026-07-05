@@ -642,8 +642,19 @@ async def verify_npc_knowledge(
         from backend.schemas import RecallResult
         recall_result = RecallResult()
 
-    # 2. Extract facts/context from recall result
-    context = recall_result.graph_context or "No prior interactions or facts stored."
+    # 2. Extract facts/context from recall result and combine with static NPC definitions (backstory, secret)
+    npc = NPC_DEFINITIONS[npc_id]
+    static_facts = (
+        f"NPC Background: {npc.full_backstory}\n"
+        f"NPC Skills: {npc.skills_description}\n"
+        f"NPC Secret: {npc.secret}\n"
+    )
+    context = (
+        f"--- CORE WORLD LORE & NPC BACKSTORY ---\n"
+        f"{static_facts}\n\n"
+        f"--- LIVE GRAPH SESSION MEMORIES (COGNEE) ---\n"
+        f"{recall_result.graph_context or 'No live session interactions recorded yet.'}"
+    )
 
     # 3. Call Gemini to perform fact-check
     result = await verify_statement_against_memory(statement, context)
