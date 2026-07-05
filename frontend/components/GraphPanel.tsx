@@ -146,24 +146,30 @@ export function GraphPanel({ graphData, dissolvingNodes, pulsatingEdges }: Props
           nodeRelSize={6}
           linkColor={(link: any) => {
             const l = link as GraphLink;
-            if (l.edgeType === "rumor") return "rgba(249, 115, 22, 0.85)"; // vibrant orange-red
-            if (l.edgeType === "trust") return "rgba(34, 197, 94, 0.8)"; // bright green
+            if (l.edgeType === "rumor") return "rgba(239, 68, 68, 0.95)"; // bright red
+            if (l.edgeType === "trust") return "rgba(34, 197, 94, 0.95)"; // bright green
             return "rgba(30, 42, 69, 0.8)"; // near-invisible default
           }}
           linkWidth={(link: any) => {
             const l = link as GraphLink;
-            return l.edgeType === "rumor" ? 2 : 1;
+            if (l.edgeType === "rumor") return 3.5;
+            if (l.edgeType === "trust") return 2.5;
+            return 1;
           }}
           linkLineDash={(link: any) => {
             const l = link as GraphLink;
-            return l.edgeType === "rumor" ? [3, 2] : null;
+            return l.edgeType === "rumor" ? [5, 3] : null;
           }}
           linkDirectionalParticles={(link: any) => {
             const l = link as GraphLink;
+            return l.edgeType === "rumor" ? 6 : 0;
+          }}
+          linkDirectionalParticleColor={() => "rgba(239, 68, 68, 1)"}
+          linkDirectionalParticleWidth={(link: any) => {
+            const l = link as GraphLink;
             return l.edgeType === "rumor" ? 4 : 0;
           }}
-          linkDirectionalParticleColor={() => "rgba(249, 115, 22, 0.9)"}
-          linkDirectionalParticleSpeed={0.005}
+          linkDirectionalParticleSpeed={0.008}
           cooldownTicks={100}
         />
 

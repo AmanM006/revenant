@@ -48,18 +48,21 @@ export default function World() {
         {/* NPCs — positioned near their buildings */}
         <NPCCharacter
           id="silas"
+          name="Silas the Blacksmith"
           position={[-5, 0, -2.2]}   // In front of Silas Forge door
           color="#f97316"
           glowColor="#7c2d12"
         />
         <NPCCharacter
           id="elara"
+          name="Elara the Mage"
           position={[5, 0, 2.8]}     // In front of Elara Tower door
           color="#a78bfa"
           glowColor="#4c1d95"
         />
         <NPCCharacter
           id="kael"
+          name="Kael the Captain"
           position={[-5, 0, 2.8]}    // In front of Kael Guard Post gate
           color="#60a5fa"
           glowColor="#1e3a5f"

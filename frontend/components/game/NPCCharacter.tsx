@@ -1,5 +1,6 @@
 import { useRef } from "react"
 import { useFrame } from "@react-three/fiber"
+import { Html } from "@react-three/drei"
 import { useGameStore } from "./store"
 import * as THREE from "three"
 
@@ -12,7 +13,7 @@ interface NPCProps {
 }
 
 
-export function NPCCharacter({ id, position, color, glowColor }: NPCProps) {
+export function NPCCharacter({ id, name, position, color, glowColor }: NPCProps) {
   const mesh = useRef<THREE.Group>(null)
   const { activeNpc } = useGameStore()
   const isNear = activeNpc === id
@@ -85,10 +86,11 @@ export function NPCCharacter({ id, position, color, glowColor }: NPCProps) {
 
       {/* Name label above NPC */}
       {isNear && (
-        <mesh position={[0, 2.1, 0]}>
-          <boxGeometry args={[1.2, 0.3, 0.05]} />
-          <meshStandardMaterial color="#06080F" transparent opacity={0.8} />
-        </mesh>
+        <Html position={[0, 2.0, 0]} center distanceFactor={15}>
+          <div className="bg-[#06080F]/90 text-white font-mono text-[10px] px-2 py-0.5 rounded border border-border/40 shadow-lg whitespace-nowrap pointer-events-none select-none uppercase tracking-wider">
+            {name || id}
+          </div>
+        </Html>
       )}
     </group>
   )

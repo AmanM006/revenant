@@ -147,8 +147,8 @@ export function HUD() {
     setTrust(p => ({ ...p, [npcId]: score }))
   }, [])
 
-  const handleGraphUpdated = useCallback((nodes: GraphNode[], edges: GraphLink[]) => {
-    setGraphData({ nodes, links: edges })
+  const handleGraphUpdated = useCallback(() => {
+    getGraph().then(g => setGraphData(g)).catch(() => {})
     showToast("Knowledge graph updated", "success")
   }, [])
 
