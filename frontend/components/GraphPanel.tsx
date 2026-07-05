@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { GraphData, GraphNode, GraphLink } from "@/lib/types";
 import { RumorToast } from "./RumorToast";
+import { CallLogPanel } from "./CallLogPanel";
 
 // Dynamic import — ForceGraph2D is canvas-based, no SSR
 const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), { ssr: false });
@@ -210,6 +211,9 @@ export function GraphPanel({ graphData, dissolvingNodes, pulsatingEdges }: Props
           </div>
         </div>
       </div>
+
+      {/* Call Log Panel */}
+      <CallLogPanel />
     </div>
   );
 }

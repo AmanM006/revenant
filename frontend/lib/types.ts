@@ -119,6 +119,7 @@ export interface AmnesiaResponse {
   document_id_erased: string;
   gold_remaining: number;
   message: string;
+  verified_deleted: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -196,7 +197,7 @@ export type WsEvent =
 // Chat messages (local UI state)
 // ---------------------------------------------------------------------------
 
-export type MessageSender = "player" | NpcId;
+export type MessageSender = "player" | "system" | NpcId;
 
 export interface ChatMessage {
   id: string;

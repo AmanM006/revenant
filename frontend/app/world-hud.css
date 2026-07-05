@@ -1,0 +1,387 @@
+
+/* ═══════════════════════════════════════════════════════════════════
+   WORLD HUD — RuneScape-style overlay on the 3D game world
+   ═══════════════════════════════════════════════════════════════════ */
+
+.game-hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  font-family: 'JetBrains Mono', monospace;
+  z-index: 100;
+}
+
+/* ── TOP BAR ─────────────────────────────────────────────────────── */
+.hud-top {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+  background: linear-gradient(180deg, rgba(18,10,4,0.97) 0%, rgba(14,8,2,0.85) 100%);
+  border-bottom: 2px solid #b45309;
+  box-shadow: 0 2px 16px rgba(0,0,0,0.7), inset 0 1px 0 rgba(212,160,60,0.2);
+  pointer-events: all;
+}
+
+.hud-title-wrap { display:flex; flex-direction:column; line-height:1.2; min-width:120px; }
+.hud-title { font-family:'Cinzel Decorative',serif; font-size:13px; color:#fbbf24; letter-spacing:0.18em; text-shadow:0 0 10px rgba(251,191,36,0.5); }
+.hud-subtitle { font-size:8px; color:#d97706; letter-spacing:0.2em; text-transform:uppercase; margin-top:1px; }
+
+/* Trust row */
+.hud-trust-row { display:flex; gap:10px; flex:1; justify-content:center; }
+.hud-trust-item { display:flex; align-items:center; gap:6px; padding:4px 8px; border:1px solid rgba(251,191,36,0.35); background:rgba(0,0,0,0.45); opacity:0.8; transition:all 0.2s; }
+.hud-trust-item.active { opacity:1; border-color:#fbbf24; background:rgba(180,83,9,0.22); box-shadow:0 0 10px rgba(251,191,36,0.3); }
+.hud-npc-icon { font-size:16px; line-height:1; }
+.hud-trust-col { display:flex; flex-direction:column; gap:2px; }
+.hud-npc-name { font-family:'Cinzel',serif; font-size:8px; letter-spacing:0.12em; color:#fbbf24; text-shadow:0 1px 2px rgba(0,0,0,0.5); }
+.hud-trust-track { width:60px; height:4px; background:rgba(0,0,0,0.7); border:1px solid rgba(180,83,9,0.4); }
+.hud-trust-fill { height:100%; transition:width 0.4s ease, background 0.3s; }
+.hud-trust-num { font-size:9px; color:#f59e0b; font-weight:bold; }
+
+/* Right controls */
+.hud-top-right { display:flex; align-items:center; gap:6px; flex-shrink:0; }
+.hud-gold { font-family:'Cinzel',serif; font-size:11px; color:#fbbf24; padding:4px 10px; background:rgba(180,83,9,0.3); border:1px solid #fbbf24; white-space:nowrap; }
+.hud-day { font-family:'Cinzel',serif; font-size:11px; color:#f59e0b; padding:4px 8px; border:1px solid rgba(251,191,36,0.3); background:rgba(0,0,0,0.5); white-space:nowrap; }
+
+.hud-action-btn {
+  font-family:'Cinzel',serif; font-size:8px; letter-spacing:0.08em;
+  padding:5px 10px; cursor:pointer; white-space:nowrap;
+  background:rgba(30,20,8,0.9); border:1px solid rgba(251,191,36,0.4);
+  color:#f59e0b; transition:all 0.15s;
+}
+.hud-action-btn:hover { background:rgba(180,83,9,0.4); color:#ffffff; border-color:#fbbf24; }
+.hud-action-btn:disabled { opacity:0.45; cursor:not-allowed; }
+.hud-action-danger { border-color:rgba(239,68,68,0.6); color:#fca5a5; }
+.hud-action-danger:hover { background:rgba(185,28,28,0.35); color:#ffffff; border-color:#ef4444; }
+
+.hud-switch-btn {
+  font-family:'Cinzel',serif; font-size:8px; letter-spacing:0.08em;
+  color:#a78bfa; text-decoration:none; padding:5px 10px;
+  border:1px solid rgba(124,58,237,0.4); background:rgba(76,29,149,0.2);
+  pointer-events:all; transition:all 0.2s; white-space:nowrap;
+}
+.hud-switch-btn:hover { color:#c4b5fd; background:rgba(76,29,149,0.4); }
+
+/* ── CONTROLS HINT ─────────────────────────────────────────────── */
+.hud-controls {
+  position:absolute; bottom:20px; left:50%; transform:translateX(-50%);
+  display:flex; gap:18px; font-size:9px; letter-spacing:0.1em;
+  color:rgba(180,83,9,0.65); padding:5px 14px;
+  background:rgba(14,8,2,0.7); border:1px solid rgba(180,83,9,0.2);
+}
+
+/* ── DIALOGUE PANEL ─────────────────────────────────────────────── */
+.hud-dialogue {
+  position:absolute; bottom:0; left:0;
+  right:340px; /* leave room for graph */
+  background:linear-gradient(to top, rgba(14,8,2,0.98) 65%, rgba(14,8,2,0.5) 100%);
+  border-top:2px solid #b45309; border-right:1px solid rgba(180,83,9,0.3);
+  padding:12px 18px 14px;
+  pointer-events:all;
+  animation:dialogue-in 0.2s ease;
+  display:flex; flex-direction:column; gap:8px;
+  max-height:60vh;
+}
+
+@keyframes dialogue-in {
+  from { opacity:0; transform:translateY(6px); }
+  to   { opacity:1; transform:translateY(0); }
+}
+
+.hud-dialogue-header {
+  display:flex; align-items:center; gap:10px;
+  padding-bottom:8px; border-bottom:1px solid rgba(180,83,9,0.25);
+}
+.hud-dialogue-icon { font-size:22px; line-height:1; }
+.hud-dialogue-npc { font-family:'Cinzel',serif; font-size:12px; letter-spacing:0.15em; color:#fbbf24; text-shadow:0 0 8px rgba(251,191,36,0.3); }
+.hud-dialogue-title { font-size:8px; letter-spacing:0.12em; color:#92400e; margin-top:2px; }
+.hud-dialogue-trust-badge { font-size:9px; padding:3px 8px; border-radius:2px; color:#fff; font-family:'Cinzel',serif; flex-shrink:0; }
+
+/* Chat log */
+.hud-chat-log {
+  flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:6px;
+  max-height:200px; min-height:60px;
+  scrollbar-width:thin; scrollbar-color:rgba(180,83,9,0.3) transparent;
+}
+.hud-chat-log::-webkit-scrollbar { width:4px; }
+.hud-chat-log::-webkit-scrollbar-thumb { background:rgba(180,83,9,0.4); }
+
+.hud-chat-empty { font-size:10px; color:#57534e; font-style:italic; padding:8px 0; }
+
+.hud-chat-msg { display:flex; align-items:baseline; gap:6px; font-size:11px; line-height:1.5; }
+.hud-chat-msg.player { }
+.hud-chat-msg.npc { }
+.hud-chat-who { font-family:'Cinzel',serif; font-size:8px; letter-spacing:0.1em; flex-shrink:0; }
+.hud-chat-msg.player .hud-chat-who { color:#fbbf24; }
+.hud-chat-msg.npc .hud-chat-who { color:#a78bfa; }
+.hud-chat-text { color:#e2c98f; font-family:'Inter',sans-serif; }
+.hud-chat-thinking { color:#d97706; font-style:italic; font-size:10px; animation:blink-step 1s infinite; }
+.hud-chat-delta { font-size:9px; flex-shrink:0; font-family:'Cinzel',serif; }
+.hud-chat-delta.pos { color:#22c55e; }
+.hud-chat-delta.neg { color:#ef4444; }
+.hud-chat-action { font-size:8px; color:#7c3aed; flex-shrink:0; letter-spacing:0.1em; }
+.hud-cursor { animation:blink 0.6s infinite; }
+
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+@keyframes blink-step { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+/* Quick replies */
+.hud-quick-actions { display:flex; gap:4px; flex-wrap:wrap; }
+.hud-quick-btn {
+  font-family:'JetBrains Mono',monospace; font-size:9px;
+  padding:4px 8px; background:rgba(0,0,0,0.35);
+  border:1px solid rgba(180,83,9,0.2); color:#78716c;
+  cursor:pointer; transition:all 0.12s;
+}
+.hud-quick-btn:hover { border-color:#b45309; color:#d97706; background:rgba(180,83,9,0.12); }
+
+/* Input row */
+.hud-dialogue-input-row { display:flex; gap:6px; }
+.hud-dialogue-input {
+  flex:1; background:rgba(0,0,0,0.6);
+  border:1px solid rgba(180,83,9,0.35); border-bottom:2px solid #b45309;
+  color:#e2c98f; padding:8px 12px;
+  font-family:'Inter',sans-serif; font-size:12px; outline:none;
+  transition:border-color 0.2s;
+}
+.hud-dialogue-input:focus { border-color:#d97706; }
+.hud-dialogue-input::placeholder { color:#57534e; }
+.hud-dialogue-send {
+  padding:8px 16px;
+  background:linear-gradient(180deg,#b45309,#92400e);
+  border:1px solid #d97706; border-bottom:2px solid #78350f;
+  color:#fbbf24; font-family:'Cinzel',serif; font-size:9px;
+  letter-spacing:0.08em; cursor:pointer; white-space:nowrap;
+  transition:background 0.12s;
+}
+.hud-dialogue-send:hover { background:linear-gradient(180deg,#d97706,#b45309); }
+.hud-dialogue-send:disabled { opacity:0.45; cursor:not-allowed; }
+
+/* ── GRAPH PANEL ────────────────────────────────────────────────── */
+.hud-graph-panel {
+  position:absolute; top:52px; right:0; bottom:0;
+  width:340px;
+  background:rgba(6,8,15,0.97);
+  border-left:2px solid rgba(124,58,237,0.4);
+  display:flex; flex-direction:column;
+  pointer-events:all;
+}
+.hud-graph-title {
+  display:flex; justify-content:space-between; align-items:center;
+  padding:8px 12px;
+  background:rgba(76,29,149,0.2); border-bottom:1px solid rgba(124,58,237,0.3);
+  font-family:'Cinzel',serif; font-size:10px; color:#a78bfa; letter-spacing:0.12em;
+}
+.hud-graph-count { font-size:8px; color:#7c3aed; font-family:'JetBrains Mono',monospace; }
+.hud-graph-body { flex:1; overflow:hidden; }
+
+/* ── MINIMAP ────────────────────────────────────────────────────── */
+.hud-minimap {
+  position:absolute; bottom:0; right:0; width:180px;
+  background:rgba(14,8,2,0.97);
+  border-top:2px solid #b45309; border-left:1px solid rgba(180,83,9,0.35);
+  padding:8px 10px;
+}
+.hud-minimap-title { font-family:'Cinzel',serif; font-size:8px; letter-spacing:0.15em; color:#d97706; margin-bottom:6px; text-align:center; }
+.hud-minimap-canvas { position:relative; width:100%; height:100px; background:rgba(74,138,46,0.15); border:1px solid rgba(180,83,9,0.25); }
+.mm-npc { position:absolute; width:8px; height:8px; border-radius:50%; transform:translate(-50%,-50%); box-shadow:0 0 5px currentColor; }
+.mm-player { position:absolute; left:50%; top:50%; width:9px; height:9px; background:#fbbf24; transform:translate(-50%,-50%) rotate(45deg); box-shadow:0 0 7px #fbbf24; }
+
+/* ── TOAST ──────────────────────────────────────────────────────── */
+.hud-toast {
+  position:absolute; top:60px; left:50%; transform:translateX(-50%);
+  padding:8px 20px; font-size:11px; letter-spacing:0.08em;
+  border:1px solid; white-space:nowrap;
+  animation:toast-in 0.2s ease;
+  pointer-events:none;
+  font-family:'JetBrains Mono',monospace;
+}
+.hud-toast-info { background:rgba(14,8,2,0.95); border-color:rgba(180,83,9,0.5); color:#d97706; }
+.hud-toast-success { background:rgba(5,46,22,0.95); border-color:rgba(22,163,74,0.5); color:#86efac; }
+.hud-toast-error { background:rgba(69,10,10,0.95); border-color:rgba(185,28,28,0.5); color:#fca5a5; }
+@keyframes toast-in { from{opacity:0;transform:translateX(-50%) translateY(-6px)} to{opacity:1;transform:translateX(-50%) translateY(0)} }
+
+/* ── COLLAPSIBLE EVIDENCE TRAIL ─────────────────────────────────── */
+.hud-chat-msg-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hud-evidence-toggle {
+  font-family: 'Cinzel', serif;
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  color: #a78bfa;
+  background: rgba(124, 58, 237, 0.12);
+  border: 1px solid rgba(124, 58, 237, 0.4);
+  padding: 1px 6px;
+  cursor: pointer;
+  margin-left: 8px;
+  transition: all 0.15s;
+  align-self: center;
+}
+.hud-evidence-toggle:hover {
+  background: rgba(124, 58, 237, 0.35);
+  color: #ffffff;
+  border-color: #a78bfa;
+}
+
+.hud-evidence-panel {
+  margin-left: 24px;
+  padding: 8px 12px;
+  background: rgba(15, 10, 5, 0.85);
+  border: 1px dashed rgba(180, 83, 9, 0.35);
+  border-left: 2px solid #b45309;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 6px;
+  max-width: 90%;
+}
+
+.hud-evidence-header {
+  font-family: 'Cinzel', serif;
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  color: #fbbf24;
+  margin-bottom: 4px;
+}
+
+/* Provenance steps */
+.hud-prov-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.hud-prov-step {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 10px;
+}
+.hud-step-num {
+  font-size: 8px;
+  color: #fbbf24;
+  font-weight: bold;
+}
+.hud-step-type {
+  font-size: 8px;
+  color: #a78bfa;
+  text-transform: uppercase;
+  background: rgba(124, 58, 237, 0.15);
+  padding: 0 4px;
+  border-radius: 2px;
+}
+.hud-step-desc {
+  color: #d6ccc2;
+  font-family: 'Inter', sans-serif;
+  margin: 0;
+}
+
+/* Citation cards */
+.hud-cite-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hud-cite-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 6px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(180, 83, 9, 0.15);
+}
+.hud-cite-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 8px;
+}
+.hud-cite-type {
+  color: #fbbf24;
+  text-transform: uppercase;
+}
+.hud-cite-source {
+  color: #7c3aed;
+}
+.hud-cite-text {
+  color: #e2c98f;
+  font-family: 'Inter', sans-serif;
+  font-size: 10px;
+  line-height: 1.3;
+  margin: 2px 0 0 0;
+}
+
+/* ── COGNEE CLOUD DIAGNOSTICS AUDIT ───────────────────────────────── */
+.hud-diagnostics-panel {
+  padding: 8px 12px;
+  background: rgba(14, 8, 2, 0.98);
+  border: 1px solid #7c2d12;
+  border-left: 3px solid #fbbf24;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+}
+
+.hud-diagnostics-header {
+  font-family: 'Cinzel', serif;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: #fbbf24;
+  text-shadow: 0 0 4px rgba(251, 191, 36, 0.35);
+  border-bottom: 1px solid rgba(180, 83, 9, 0.3);
+  padding-bottom: 4px;
+}
+
+.hud-diag-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px 12px;
+}
+
+.hud-diag-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 9px;
+}
+
+.hud-diag-label {
+  color: #d97706;
+  font-weight: bold;
+}
+
+.hud-diag-val {
+  color: #ffffff;
+}
+
+.font-mono {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 8px;
+  letter-spacing: -0.02em;
+}
+
+.hud-chat-msg.system .hud-chat-who {
+  color: #fbbf24;
+  border: 1px solid #7c2d12;
+  background: rgba(124, 45, 18, 0.35);
+  padding: 0 4px;
+  font-size: 7px;
+  border-radius: 2px;
+}
+
+.hud-chat-msg.system .hud-chat-text {
+  color: #fca5a5;
+  font-style: italic;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+}
+
+
+

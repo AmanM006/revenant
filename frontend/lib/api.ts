@@ -166,3 +166,19 @@ export async function getGraph(): Promise<GraphData> {
 export async function checkHealth(): Promise<{ status: string }> {
   return apiFetch("GET", "/health");
 }
+
+export async function getSessionStats(npcId: NpcId): Promise<any> {
+  return apiFetch("GET", `/session/${getWorldId()}/${npcId}`);
+}
+
+export async function verifyDialogue(
+  npcId: NpcId,
+  statement: string
+): Promise<{ success: boolean; verdict: "true" | "false" | "unknown"; reason: string; gold_remaining: number }> {
+  return apiFetch("POST", "/dialogue/verify", {
+    npc_id: npcId,
+    statement,
+    world_id: getWorldId(),
+  });
+}
+

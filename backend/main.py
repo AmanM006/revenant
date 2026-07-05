@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import json
 
 from backend.cognee_client import cognee
-from backend.npc_engine import cast_amnesia, process_action, process_dialogue, _build_system_prompt, _save_dialogue_memories
+from backend.npc_engine import cast_amnesia, process_action, process_dialogue, _build_system_prompt, _save_dialogue_memories, PROVENANCE_TRIGGERS, verify_npc_knowledge
 from backend.rumor_mill import trigger_rumor_mill
 from backend.schemas import (
     ActionRequest,
@@ -31,6 +31,7 @@ from backend.schemas import (
     TrustResponse,
     WorldInitRequest,
     WorldInitResponse,
+    VerifyRequest,
 )
 from backend.world_state import (
     NPC_DEFINITIONS,
@@ -145,6 +146,16 @@ async def init_world(body: WorldInitRequest) -> WorldInitResponse:
     dataset_name = f"world_{world_id}"
     logger.info(f"Initializing world: {world_id}")
 
+    # Upload ontology schema to Cognee Cloud to enforce graph structure
+    try:
+        await cognee.upload_ontology(
+            ontology_key="ashenvale_ontology",
+            file_path="backend/ontology.owl",
+            description="Revenant NPC Cognitive Engine OWL Ontology Schema"
+        )
+    except Exception as e:
+        logger.warning(f"Ontology upload failed (continuing): {e}")
+
     # 1. Collect all NPC seed texts and push via add_text + cognify
     seed_texts: list[str] = []
     for npc_id, npc in NPC_DEFINITIONS.items():
@@ -152,49 +163,65 @@ async def init_world(body: WorldInitRequest) -> WorldInitResponse:
         seed_texts.append(npc.skills_description)
         seed_texts.append(npc.secret)
 
-    try:
-        await cognee.init_dataset(dataset_name, seed_texts)
-        logger.info(f"Dataset '{dataset_name}' seeded with {len(seed_texts)} texts")
-    except Exception as e:
-        logger.warning(f"init_dataset failed (continuing): {e}")
+    # 2. Write typed memory entries for each NPC in parallel
+    import asyncio
 
-    # 2. Write typed memory entries for each NPC
-    npcs_seeded: list[str] = []
-    for npc_id, npc in NPC_DEFINITIONS.items():
+    async def seed_npc(npc_id, npc):
         session_id = f"{dataset_name}_{npc_id}_init"
+        now_iso = datetime.now(timezone.utc).isoformat()
         try:
-            # Backstory as trace
-            await cognee.remember_trace(
-                origin_function=f"world_init_{npc_id}",
-                memory_query=f"{npc.name} identity",
-                memory_context=npc.full_backstory,
-                dataset_name=dataset_name,
-                session_id=session_id,
-            )
-            # Skills also as trace (skill_run requires pre-registered skill IDs)
-            await cognee.remember_trace(
-                origin_function=f"npc_skills_{npc_id}",
-                memory_query=f"{npc.name} available skills",
-                memory_context=npc.skills_description,
-                dataset_name=dataset_name,
-                session_id=session_id,
-            )
-            # Initial trust as qa
-            now_iso = datetime.now(timezone.utc).isoformat()
-            await cognee.remember_qa(
-                question=f"What is {npc.name}'s initial disposition toward the player?",
-                answer=(
-                    f"{npc.name} starts with trust score {npc.initial_trust}/100. "
-                    f"valid_from={now_iso}, game_day=0."
+            await asyncio.gather(
+                cognee.remember_trace(
+                    origin_function=f"world_init_{npc_id}",
+                    memory_query=f"{npc.name} identity",
+                    memory_context=npc.full_backstory,
+                    dataset_name=dataset_name,
+                    session_id=session_id,
                 ),
-                context=f"World init. NPC: {npc_id}.",
-                dataset_name=dataset_name,
-                session_id=session_id,
+                cognee.remember_trace(
+                    origin_function=f"npc_skills_{npc_id}",
+                    memory_query=f"{npc.name} available skills",
+                    memory_context=npc.skills_description,
+                    dataset_name=dataset_name,
+                    session_id=session_id,
+                ),
+                cognee.remember_qa(
+                    question=f"What is {npc.name}'s initial disposition toward the player?",
+                    answer=(
+                        f"{npc.name} starts with trust score {npc.initial_trust}/100. "
+                        f"valid_from={now_iso}, game_day=0."
+                    ),
+                    context=f"World init. NPC: {npc_id}.",
+                    dataset_name=dataset_name,
+                    session_id=session_id,
+                )
             )
-            npcs_seeded.append(npc_id)
-            logger.info(f"Seeded NPC: {npc_id}")
+            return npc_id
         except Exception as e:
             logger.error(f"Failed to seed NPC {npc_id}: {e}")
+            raise e
+
+    # Heavy seeding pipeline run in the background
+    async def run_seeding_background():
+        try:
+            await cognee.init_dataset(dataset_name, seed_texts)
+            logger.info(f"Dataset '{dataset_name}' seeded with {len(seed_texts)} texts")
+        except Exception as e:
+            logger.warning(f"init_dataset failed (continuing): {e}")
+
+        try:
+            for npc_id, npc in NPC_DEFINITIONS.items():
+                try:
+                    res = await seed_npc(npc_id, npc)
+                    logger.info(f"Seeded NPC: {res}")
+                except Exception as e:
+                    logger.error(f"Seeding failed for NPC {npc_id}: {e}")
+                await asyncio.sleep(1.0)
+        except Exception as e:
+            logger.error(f"World init seeding failed: {e}")
+
+    # Fire and forget the background task
+    asyncio.create_task(run_seeding_background())
 
     # 3. Initialize in-memory game state
     init_world_state(world_id)
@@ -203,7 +230,7 @@ async def init_world(body: WorldInitRequest) -> WorldInitResponse:
         world_id=world_id,
         dataset_id=dataset_name,
         status="ready",
-        npcs_seeded=npcs_seeded,
+        npcs_seeded=list(NPC_DEFINITIONS.keys()),
     )
 
 
@@ -268,10 +295,42 @@ async def dialogue_stream(body: DialogueRequest):
             from backend.schemas import RecallResult
             recall_result = RecallResult()
 
+        # Step 2.5: Provenance chain check
+        provenance_chain = None
+        message_lower = body.message.lower()
+        is_provenance_query = any(trigger in message_lower for trigger in PROVENANCE_TRIGGERS)
+        if is_provenance_query:
+            try:
+                prov_result = await cognee.recall(
+                    query=(
+                        f"Who is the original source of information about the player being "
+                        f"untrustworthy, a thief, or a criminal? "
+                        f"Trace the complete information propagation path from origin to {body.npc_id}. "
+                        f"Show the chain: player action → NPC reaction → rumor → target NPC."
+                    ),
+                    dataset_name=dataset_name,
+                    graph_traversal=True,
+                )
+                provenance_chain = [
+                    {
+                        "step": i + 1,
+                        "document_id": item.get("document_id") or item.get("dataset_id") or f"node_{i}",
+                        "type": item.get("kind", item.get("search_type", "graph_completion")),
+                        "content_preview": str(
+                            item.get("text", item.get("raw", {}).get("value", ""))
+                        )[:60],
+                        "timestamp": str(item.get("metadata", {}).get("timestamp", "")),
+                    }
+                    for i, item in enumerate(prov_result.nodes[:5])
+                    if isinstance(item, dict)
+                ]
+            except Exception as e:
+                logger.warning(f"Provenance recall failed in stream: {e}")
+
         yield f"data: {json.dumps({'type': 'status', 'step': 'generating', 'label': 'Forming response...'})}\n\n"
 
         # Step 3: Build prompt and stream Gemini
-        system_prompt = _build_system_prompt(npc, trust, trajectory, game_day, recall_result, body.message, body.world_id)
+        system_prompt = _build_system_prompt(npc, trust, trajectory, game_day, recall_result, body.message, body.world_id, provenance_chain)
 
         from backend.llm import stream_npc_response
         final_dialogue = ""
@@ -284,6 +343,19 @@ async def dialogue_stream(body: DialogueRequest):
                     final_dialogue = chunk["dialogue"]
                     final_delta = chunk["trust_delta"]
                     final_action = chunk["action"]
+                    # Add citations and provenance to done chunk
+                    chunk["citations"] = [
+                        {
+                            "document_id": c.document_id,
+                            "type": c.type,
+                            "timestamp": c.timestamp,
+                            "content_preview": c.content_preview,
+                            "score": c.score,
+                            "source_document": c.source_document,
+                        }
+                        for c in recall_result.citations
+                    ]
+                    chunk["provenance_chain"] = provenance_chain
                 yield f"data: {json.dumps(chunk)}\n\n"
         except Exception as e:
             logger.error(f"Gemini streaming generator encountered error: {e}")
@@ -316,6 +388,25 @@ async def dialogue_stream(body: DialogueRequest):
             "X-Accel-Buffering": "no",
         }
     )
+
+
+@app.post("/dialogue/verify", response_model=dict)
+async def verify_dialogue(body: VerifyRequest) -> dict:
+    """
+    Verify a statement against the NPC's Cognee memories (Zone of Truth spell).
+    Deducts 10 Gold.
+    """
+    require_world(body.world_id)
+    try:
+        result = await verify_npc_knowledge(
+            world_id=body.world_id,
+            npc_id=body.npc_id,
+            statement=body.statement,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Verification route error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ---------------------------------------------------------------------------
@@ -366,6 +457,25 @@ async def rumor_mill(body: RumorMillRequest) -> RumorMillResponse:
     except Exception as e:
         logger.error(f"Rumor mill error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Sessions details (Cognitive Diagnostics)
+# ---------------------------------------------------------------------------
+
+@app.get("/session/{world_id}/{npc_id}")
+async def get_session_stats(world_id: str, npc_id: str) -> dict:
+    """
+    Fetches runtime metadata and LLM tokens/cost auditing from Cognee Cloud for the NPC's active session.
+    """
+    require_world(world_id)
+    if npc_id not in NPC_DEFINITIONS:
+        raise HTTPException(status_code=404, detail=f"NPC '{npc_id}' not found.")
+    
+    from backend.world_state import get_session_id
+    session_id = get_session_id(world_id, npc_id)
+    details = await cognee.get_session_details(session_id)
+    return details
 
 
 # ---------------------------------------------------------------------------
@@ -631,3 +741,18 @@ def _edge_color(edge_type: str) -> str:
         "rumor": "#F97316",
         "event": "#3B82F6",
     }.get(edge_type, "#64748B")
+
+
+# ---------------------------------------------------------------------------
+# Call log endpoint (Improvement 2 Step B)
+# ---------------------------------------------------------------------------
+from backend.cognee_client import get_call_log
+
+@app.get("/call-log")
+async def call_log() -> list[dict]:
+    """
+    Returns the last 50 Cognee Cloud API calls with timing.
+    Used by the frontend's live call log panel to prove Cognee usage is real.
+    """
+    return get_call_log()
+

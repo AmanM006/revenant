@@ -1,6 +1,7 @@
 "use client";
 // app/play/page.tsx — Overhauled 3-panel gameplay interface
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getGraph,
@@ -72,20 +73,39 @@ export default function PlayPage() {
     elara: [],
     kael: [],
   });
-  const [isThinking, setIsThinking] = useState(false);
-  const [loadingNpc, setLoadingNpc] = useState<NpcId | null>(null);
-  const [streamingText, setStreamingText] = useState("");
-  const [thinkingStep, setThinkingStep] = useState("");
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const [isThinking, setIsThinking] = useState<Record<NpcId, boolean>>({
+    silas: false,
+    elara: false,
+    kael: false,
+  });
+  const [loadingNpcs, setLoadingNpcs] = useState<Record<NpcId, boolean>>({
+    silas: false,
+    elara: false,
+    kael: false,
+  });
+  const [streamingText, setStreamingText] = useState<Record<NpcId, string>>({
+    silas: "",
+    elara: "",
+    kael: "",
+  });
+  const [thinkingStep, setThinkingStep] = useState<Record<NpcId, string>>({
+    silas: "",
+    elara: "",
+    kael: "",
+  });
+  const abortControllersRef = useRef<Record<NpcId, AbortController | null>>({
+    silas: null,
+    elara: null,
+    kael: null,
+  });
 
   useEffect(() => {
-    // Cancel in-flight stream on NPC switch
-    abortControllerRef.current?.abort();
-    setIsThinking(false);
-    setStreamingText("");
-    setThinkingStep("");
-    setLoadingNpc(null);
-  }, [selectedNpc]);
+    const controllers = abortControllersRef.current;
+    return () => {
+      // Cancel in-flight streams on unmount
+      Object.values(controllers).forEach((ac) => ac?.abort());
+    };
+  }, []);
 
   // Graph
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
@@ -148,6 +168,35 @@ export default function PlayPage() {
   }, []);
 
   // ---------------------------------------------------------------------------
+  // Graph Self-Healing Poll
+  // Cognee Cloud graph indexing is async and has a propagation delay.
+  // The initial getGraph() call may return 0 nodes if the graph is still writing.
+  // We poll every 5s until nodes are returned, then clear the interval.
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (initStatus !== "ready" || graphData.nodes.length > 0 || !worldId) return;
+
+    let attempts = 0;
+    const interval = setInterval(async () => {
+      attempts++;
+      try {
+        const graph = await getGraph();
+        if (graph.nodes && graph.nodes.length > 0) {
+          setGraphData(graph);
+          clearInterval(interval);
+        }
+      } catch (err) {
+        console.error("Error polling graph:", err);
+      }
+      if (attempts >= 12) {
+        clearInterval(interval);
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [initStatus, graphData.nodes.length, worldId]);
+
+  // ---------------------------------------------------------------------------
   // WebSocket handlers
   // ---------------------------------------------------------------------------
   const handleRumorInjected = useCallback((from: NpcId, to: NpcId, label: string) => {
@@ -201,15 +250,16 @@ export default function PlayPage() {
   async function handleSend(message: string) {
     if (!worldId) return;
 
-    // Cancel any in-flight request
-    abortControllerRef.current?.abort();
-    abortControllerRef.current = new AbortController();
-
     const activeNpc = selectedNpc;
-    setLoadingNpc(activeNpc);
-    setIsThinking(true);
-    setThinkingStep("Querying memory graph...");
-    setStreamingText("");
+
+    // Cancel any in-flight request for this specific NPC
+    abortControllersRef.current[activeNpc]?.abort();
+    abortControllersRef.current[activeNpc] = new AbortController();
+
+    setLoadingNpcs((prev) => ({ ...prev, [activeNpc]: true }));
+    setIsThinking((prev) => ({ ...prev, [activeNpc]: true }));
+    setThinkingStep((prev) => ({ ...prev, [activeNpc]: "Querying memory graph..." }));
+    setStreamingText((prev) => ({ ...prev, [activeNpc]: "" }));
 
     const playerMsg: ChatMessage = {
       id: `player-${Date.now()}`,
@@ -227,7 +277,7 @@ export default function PlayPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ npc_id: activeNpc, message, world_id: worldId }),
-        signal: abortControllerRef.current.signal,
+        signal: abortControllersRef.current[activeNpc]!.signal,
       });
 
       if (!response.body) return;
@@ -253,16 +303,16 @@ export default function PlayPage() {
             const data = JSON.parse(line.slice(6));
 
             if (data.type === "status") {
-              setThinkingStep(data.label);
+              setThinkingStep((prev) => ({ ...prev, [activeNpc]: data.label }));
             } else if (data.type === "chunk") {
-              setStreamingText(data.text);
-              setIsThinking(false);
+              setStreamingText((prev) => ({ ...prev, [activeNpc]: data.text }));
+              setIsThinking((prev) => ({ ...prev, [activeNpc]: false }));
             } else if (data.type === "done") {
               finalDialogue = data.dialogue;
               finalDelta = data.trust_delta;
               finalAction = data.action;
-              setStreamingText("");
-              setIsThinking(false);
+              setStreamingText((prev) => ({ ...prev, [activeNpc]: "" }));
+              setIsThinking((prev) => ({ ...prev, [activeNpc]: false }));
 
               const npcMsg: ChatMessage = {
                 id: `npc-${Date.now()}`,
@@ -296,9 +346,9 @@ export default function PlayPage() {
         showToast(`Dialogue error: ${err.message}`, "error");
       }
     } finally {
-      setIsThinking(false);
-      setLoadingNpc(null);
-      setStreamingText("");
+      setIsThinking((prev) => ({ ...prev, [activeNpc]: false }));
+      setLoadingNpcs((prev) => ({ ...prev, [activeNpc]: false }));
+      setStreamingText((prev) => ({ ...prev, [activeNpc]: "" }));
     }
   }
 
@@ -342,9 +392,13 @@ export default function PlayPage() {
   // ---------------------------------------------------------------------------
   // Amnesia success
   // ---------------------------------------------------------------------------
-  function handleAmnesiaSuccess(documentId: string, goldRemaining: number) {
+  function handleAmnesiaSuccess(documentId: string, goldRemaining: number, verifiedDeleted: boolean) {
     setGold(goldRemaining);
-    showToast(`Memory erased: ${documentId}. -50g.`, "success");
+    if (verifiedDeleted) {
+      showToast("✓ Memory erased and verified gone from graph", "success");
+    } else {
+      showToast("Memory erased. Cognee Cloud processing deletion...", "success");
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -403,7 +457,7 @@ export default function PlayPage() {
   return (
     <div className="h-screen flex flex-col bg-void overflow-hidden font-body text-primary">
       {/* Topbar Header */}
-      <header className="flex items-center gap-4 px-5 py-3 border-b border-border bg-surface shrink-0 z-10">
+      <header className="flex items-center gap-4 px-5 py-3 border-b border-border bg-surface shrink-0 z-10" style={{ zoom: 0.8 }}>
         <h1 className="font-decorative text-lg text-purple-glow header-glow tracking-[0.15em] uppercase">
           REVENANT
         </h1>
@@ -421,6 +475,12 @@ export default function PlayPage() {
             <span className="text-amber">◆</span>
             <span className="text-amber font-bold">{gold}g</span>
           </div>
+          <Link
+            href="/world"
+            className="text-[10px] font-mono text-amber border border-amber/40 hover:border-amber rounded px-2.5 py-0.5 transition-all duration-200"
+          >
+            🎮 3D World
+          </Link>
           <a
             href="https://cognee.ai"
             target="_blank"
@@ -435,25 +495,25 @@ export default function PlayPage() {
       {/* 3-Panel Layout */}
       <div className="flex flex-1 min-h-0 gap-0">
         {/* LEFT: NPC panel */}
-        <div className="w-[280px] shrink-0 p-3 border-r border-border overflow-hidden bg-void">
+        <div className="w-[350px] shrink-0 p-3 border-r border-border overflow-hidden bg-void" style={{ zoom: 0.8 }}>
           <NPCPanel
             npcs={npcPanelData}
             selectedNpc={selectedNpc}
-            loadingNpc={loadingNpc}
+            loadingNpcs={loadingNpcs}
             onSelect={setSelectedNpc}
           />
         </div>
 
         {/* CENTER: Dialogue panel */}
-        <div className="flex-1 min-w-0 border-r border-border flex flex-col overflow-hidden p-3 bg-void">
+        <div className="flex-1 min-w-0 border-r border-border flex flex-col overflow-hidden p-3 bg-void" style={{ zoom: 0.8 }}>
           <DialoguePanel
             npcId={selectedNpc}
             npcName={NPC_NAMES[selectedNpc]}
             messages={messages[selectedNpc]}
             trust={trust[selectedNpc]}
-            isThinking={isThinking}
-            thinkingStep={thinkingStep}
-            streamingText={streamingText}
+            isThinking={isThinking[selectedNpc]}
+            thinkingStep={thinkingStep[selectedNpc]}
+            streamingText={streamingText[selectedNpc]}
             onSend={handleSend}
           />
         </div>
@@ -482,14 +542,16 @@ export default function PlayPage() {
       </div>
 
       {/* Engine Action Controls */}
-      <EngineControls
-        gold={gold}
-        rumorLoading={rumorLoading}
-        onTriggerRumorMill={handleRumorMill}
-        onOpenAmnesia={() => setAmnesiaOpen(true)}
-        onTimeSkip={handleTimeSkip}
-        timeskipLoading={timeskipLoading}
-      />
+      <div style={{ zoom: 0.8 }}>
+        <EngineControls
+          gold={gold}
+          rumorLoading={rumorLoading}
+          onTriggerRumorMill={handleRumorMill}
+          onOpenAmnesia={() => setAmnesiaOpen(true)}
+          onTimeSkip={handleTimeSkip}
+          timeskipLoading={timeskipLoading}
+        />
+      </div>
 
       {/* Amnesia modal */}
       <AmnesiaModal

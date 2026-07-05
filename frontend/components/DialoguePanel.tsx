@@ -118,7 +118,7 @@ export function DialoguePanel({
 
               {/* Message bubble */}
               <div
-                className={`px-4 py-2.5 rounded-xl text-[14px] font-body leading-relaxed max-w-[80%] ${
+                className={`px-4 py-2.5 rounded-xl text-[16px] font-body leading-relaxed max-w-[80%] ${
                   isNpc
                     ? "bg-surface border border-border text-primary rounded-tl-none border-l-2 border-l-purple"
                     : "bg-raised border border-border/80 text-primary rounded-tr-none border-r-2 border-r-amber ml-auto"
@@ -167,7 +167,7 @@ export function DialoguePanel({
             <span className="font-display text-[10px] text-purple-glow tracking-wider mb-1 ml-2">
               {npcName.toUpperCase()}
             </span>
-            <div className="npc-bubble streaming px-4 py-2.5 rounded-xl text-[14px] font-body leading-relaxed max-w-[80%] bg-surface border border-border text-primary rounded-tl-none border-l-2 border-l-purple shadow-sm">
+            <div className="npc-bubble streaming px-4 py-2.5 rounded-xl text-[16px] font-body leading-relaxed max-w-[80%] bg-surface border border-border text-primary rounded-tl-none border-l-2 border-l-purple shadow-sm">
               {streamingText}
               <span className="cursor-blink ml-1 text-purple-glow animate-pulse">▊</span>
             </div>
@@ -204,7 +204,7 @@ export function DialoguePanel({
             key={qa.label}
             onClick={() => onSend(qa.value)}
             disabled={isThinking || !!streamingText}
-            className="text-[11px] font-body px-2.5 py-1 rounded border border-border text-secondary hover:text-primary hover:border-bright hover:bg-hover transition-all duration-150 disabled:opacity-40"
+            className="text-[13px] font-body px-2.5 py-1 rounded border border-border text-secondary hover:text-primary hover:border-bright hover:bg-hover transition-all duration-150 disabled:opacity-40"
           >
             {qa.label}
           </button>
@@ -223,7 +223,7 @@ export function DialoguePanel({
           disabled={isThinking || !!streamingText}
           placeholder={`Speak to ${npcName}...`}
           className="
-            flex-1 bg-void border border-border rounded-lg px-3 py-2 text-[14px] text-primary
+            flex-1 bg-void border border-border rounded-lg px-3 py-2 text-[16px] text-primary
             placeholder:text-muted outline-none focus:border-purple focus:ring-1 focus:ring-purple/20 transition-all duration-200
             disabled:opacity-50 font-body
           "

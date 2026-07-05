@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from backend.cognee_client import cognee
-from backend.llm import generate_npc_response, generate_provenance_narrative
+from backend.llm import generate_npc_response, generate_provenance_narrative, verify_statement_against_memory
 from backend.rumor_mill import trigger_rumor_mill
 from backend.schemas import CitationEntry, DialogueResponse
 from backend.world_state import (
@@ -219,17 +219,19 @@ async def _save_dialogue_memories(
     feedback_doc_id = f"feedback_{npc_id}_{ts}"
     if qa_entry_id and trust_delta != 0:
         try:
-            await cognee.remember_feedback(
+            fb_resp = await cognee.remember_feedback(
                 qa_id=qa_entry_id,
                 feedback_text=f"Trust {trust} → {new_trust} (delta={trust_delta:+d}). Day {game_day}.",
                 feedback_score=trust_delta,
                 dataset_name=dataset_name,
                 session_id=session_id,
             )
+            feedback_uuid = fb_resp.get("entry_id") if isinstance(fb_resp, dict) else None
+            
             if trust_delta < -10:
                 register_memory(
                     world_id, npc_id,
-                    doc_id=feedback_doc_id,
+                    doc_id=feedback_uuid or feedback_doc_id,
                     description=(
                         f"{npc.name}'s trust dropped {trust}→{new_trust} "
                         f"({'betrayal' if trust_delta < -20 else 'negative interaction'}, Day {game_day})"
@@ -244,7 +246,7 @@ async def _save_dialogue_memories(
     if action != "none":
         skill_doc_id = f"skill_{npc_id}_{action}_{ts}"
         try:
-            await cognee.remember_skill_run(
+            skill_resp = await cognee.remember_skill_run(
                 run_id=skill_doc_id,
                 skill_id=action,
                 task_text=f"{npc.name} triggered '{action}' on Day {game_day}.",
@@ -253,9 +255,10 @@ async def _save_dialogue_memories(
                 session_id=session_id,
                 success_score=1.0,
             )
+            skill_uuid = skill_resp.get("entry_id") if isinstance(skill_resp, dict) else None
             register_memory(
                 world_id, npc_id,
-                doc_id=skill_doc_id,
+                doc_id=skill_uuid or skill_doc_id,
                 description=f"{npc.name} took action: '{action}' (Day {game_day})",
                 entry_type="skill_run",
                 game_day=game_day,
@@ -433,8 +436,9 @@ async def process_action(
             dataset_name=dataset_name,
             session_id=session_id,
         )
+        fb_uuid = None
         if qa_id:
-            await cognee.remember_feedback(
+            fb_resp = await cognee.remember_feedback(
                 qa_id=qa_id,
                 feedback_text=(
                     f"PLAYER_ACTION {action_type.upper()} on Day {game_day}. "
@@ -444,10 +448,12 @@ async def process_action(
                 dataset_name=dataset_name,
                 session_id=session_id,
             )
+            fb_uuid = fb_resp.get("entry_id") if isinstance(fb_resp, dict) else None
+            
         if delta < -15:
             register_memory(
                 world_id, npc_id,
-                doc_id=f"feedback_{npc_id}_{action_type}_{ts}",
+                doc_id=fb_uuid or f"feedback_{npc_id}_{action_type}_{ts}",
                 description=f"{npc.name} remembers you {action_type}d them (trust: {trust}→{new_trust}, Day {game_day})",
                 entry_type="feedback",
                 game_day=game_day,
@@ -472,8 +478,9 @@ async def process_action(
 
     if new_trust < 40 and delta < 0:
         try:
-            await cognee.remember_skill_run(
-                run_id=f"skill_{npc_id}_warn_{ts}",
+            skill_doc_id = f"skill_{npc_id}_warn_{ts}"
+            skill_resp = await cognee.remember_skill_run(
+                run_id=skill_doc_id,
                 skill_id="warn_others",
                 task_text=f"{npc.name} warns other NPCs after '{action_type}'.",
                 result_summary=(
@@ -481,6 +488,14 @@ async def process_action(
                 ),
                 dataset_name=dataset_name,
                 success_score=1.0,
+            )
+            skill_uuid = skill_resp.get("entry_id") if isinstance(skill_resp, dict) else None
+            register_memory(
+                world_id, npc_id,
+                doc_id=skill_uuid or skill_doc_id,
+                description=f"{npc.name} took action: 'warn_others' (Day {game_day})",
+                entry_type="skill_run",
+                game_day=game_day,
             )
         except Exception as e:
             logger.warning(f"action skill_run failed: {e}")
@@ -535,17 +550,36 @@ async def cast_amnesia(
 
     remaining_gold = deduct_gold(world_id, 50)
 
-    await cognee.forget_document(dataset_name, document_id)
+    result = await cognee.forget_document(dataset_name, document_id)
     remove_memory(world_id, npc_id, document_id)
 
+    # NEW: verify deletion by recalling the specific document_id
+    # This proves forget() actually worked, not just returned 200
+    verification_recall = await cognee.recall(
+        query=f"document_id:{document_id}",
+        dataset_name=dataset_name,
+        graph_traversal=False,
+    )
+    
+    # Check if document_id still appears in results
+    still_present = any(
+        str(item.get("document_id", "")) == document_id or
+        str(item.get("chunk_id", "")) == document_id
+        for item in verification_recall.nodes
+        if isinstance(item, dict)
+    )
+    
+    verified_deleted = not still_present
+    
+    # Record verification as trace
     try:
         await cognee.remember_trace(
-            origin_function="amnesia_spell",
-            memory_query=f"erase {document_id}",
+            origin_function="amnesia_verification",
+            memory_query=f"verify deletion of {document_id}",
             memory_context=(
-                f"AMNESIA_SPELL cast on {npc_id} at Day {game_day}. "
-                f"Memory erased: {document_id}. Player spent 50 gold. "
-                f"The forgetting is now a permanent trace in the knowledge graph."
+                f"AMNESIA_VERIFICATION: document {document_id} "
+                f"{'CONFIRMED DELETED' if verified_deleted else 'STILL PRESENT — deletion may be pending'}. "
+                f"Verification recall returned {len(verification_recall.nodes)} results."
             ),
             dataset_name=dataset_name,
             session_id=session_id,
@@ -559,14 +593,86 @@ async def cast_amnesia(
             {"type": "node_dissolve", "document_id": document_id, "npc_id": npc_id},
         )
 
-    logger.info(f"Amnesia cast: {npc_id} forgot {document_id}. Gold remaining: {remaining_gold}")
+    logger.info(f"Amnesia cast: {npc_id} forgot {document_id}. Gold remaining: {remaining_gold}. Verified: {verified_deleted}")
 
     return {
         "success": True,
         "document_id_erased": document_id,
         "gold_remaining": remaining_gold,
-        "message": (
-            f"Memory '{document_id}' erased from {NPC_DEFINITIONS[npc_id].name}'s mind. "
-            f"-50 gold. {remaining_gold}g remaining."
-        ),
+        "verified_deleted": verified_deleted,
+        "message": f"Memory erased. {'Deletion verified.' if verified_deleted else 'Deletion pending.'} -50 gold.",
     }
+
+
+async def verify_npc_knowledge(
+    world_id: str,
+    npc_id: str,
+    statement: str,
+) -> dict:
+    """
+    Verifies a statement against an NPC's recalled knowledge using Cognee Cloud.
+    Cost: 10 gold (casting the 'Zone of Truth' spell!).
+    """
+    current_gold = get_gold(world_id)
+    if current_gold < 10:
+        return {
+            "success": False,
+            "verdict": "unknown",
+            "reason": "You need 10 Gold to cast the 'Zone of Truth' truth-check spell.",
+            "gold_remaining": current_gold,
+        }
+
+    # Deduct 10 gold
+    remaining_gold = deduct_gold(world_id, 10)
+
+    # Setup multi-tenant names
+    dataset_name = f"world_{world_id}"
+    session_id = get_session_id(world_id, npc_id)
+
+    # 1. Recall related memories from Cognee Cloud
+    logger.info(f"Verify: recalling context for {npc_id} in {world_id} to check: '{statement}'")
+    try:
+        recall_result = await cognee.recall(
+            query=statement,
+            dataset_name=dataset_name,
+            session_id=session_id,
+        )
+    except Exception as e:
+        logger.warning(f"Verify recall failed: {e}")
+        from backend.schemas import RecallResult
+        recall_result = RecallResult()
+
+    # 2. Extract facts/context from recall result
+    context = recall_result.graph_context or "No prior interactions or facts stored."
+
+    # 3. Call Gemini to perform fact-check
+    result = await verify_statement_against_memory(statement, context)
+
+    # 4. Save audit trace of the verification in Cognee!
+    try:
+        await cognee.remember(
+            entry_type="trace",
+            entry_data=dict(
+                type="zone_of_truth",
+                statement=statement,
+                verdict=result["verdict"],
+                reason=result["reason"],
+                details=f"Zone of Truth check by player. Result: {result['verdict'].upper()} - {result['reason']}",
+            ),
+            dataset_name=dataset_name,
+            session_id=session_id,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to store verification audit trace in Cognee: {e}")
+
+    logger.info(f"Verify result for {npc_id}: {result['verdict'].upper()} - {result['reason']}. Remaining gold: {remaining_gold}")
+
+    return {
+        "success": True,
+        "verdict": result["verdict"],
+        "reason": result["reason"],
+        "gold_remaining": remaining_gold,
+    }
+
+
+

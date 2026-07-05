@@ -21,6 +21,12 @@ class DialogueRequest(BaseModel):
     world_id: str
 
 
+class VerifyRequest(BaseModel):
+    npc_id: Literal["silas", "elara", "kael"]
+    statement: str = Field(min_length=1, max_length=500)
+    world_id: str
+
+
 class ActionRequest(BaseModel):
     npc_id: Literal["silas", "elara", "kael"]
     action_type: Literal["betray", "steal", "help", "pay", "insult", "compliment", "bribe"]
@@ -54,6 +60,7 @@ class CitationEntry(BaseModel):
     timestamp: str
     content_preview: str
     score: float = 0.0
+    source_document: str = ""
 
 
 class RecallResult(BaseModel):

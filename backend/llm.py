@@ -257,3 +257,61 @@ async def generate_provenance_narrative(
             logger.warning(f"Provenance generation failed on {model_name}: {e}")
             continue
     return "I have my sources. Best leave it at that."
+
+# ---------------------------------------------------------------------------
+# Lore statement verifier / Fact checker
+# ---------------------------------------------------------------------------
+
+async def verify_statement_against_memory(
+    statement: str,
+    context: str,
+) -> dict:
+    """
+    Judge a statement as TRUE, FALSE, or UNKNOWN based on recalled memories.
+    """
+    system_instruction = (
+        "You are the case fact-checker for an RPG town lore. Using ONLY the "
+        "provided memories/facts, judge whether a new statement is:\n"
+        "1. TRUE (supported by or consistent with the memories)\n"
+        "2. FALSE (contradicted by the memories)\n"
+        "3. UNKNOWN (no evidence either way in the memories)\n\n"
+        "You MUST respond with a JSON object containing:\n"
+        '  "verdict": "true" | "false" | "unknown",\n'
+        '  "reason": a short explanation (at most 10 words).\n'
+        "Output ONLY raw JSON. No code fences, no formatting."
+    )
+    
+    contents = (
+        f"LORE MEMORIES:\n{context}\n\n"
+        f"STATEMENT TO CHECK:\n{statement}"
+    )
+    
+    for attempt, model_name in enumerate(MODELS):
+        if attempt > 0:
+            await asyncio.sleep(1)
+        try:
+            response = _client.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    temperature=0.0,
+                    max_output_tokens=300,
+                ),
+            )
+            text = response.text or ""
+            # Find the JSON block
+            match = re.search(r"\{.*\}", text.replace("\n", " "))
+            if match:
+                data = json.loads(match.group(0))
+                verdict = data.get("verdict")
+                if verdict in ("true", "false", "unknown"):
+                    return {
+                        "verdict": verdict,
+                        "reason": data.get("reason", "Verified against memory graph.")
+                    }
+        except Exception as e:
+            logger.warning(f"Verify failed on model {model_name}: {e}")
+            continue
+            
+    return {"verdict": "unknown", "reason": "Truth check failed to execute."}

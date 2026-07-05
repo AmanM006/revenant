@@ -98,12 +98,20 @@ export default function LandingPage() {
             </a>
           </nav>
 
-          <Link
-            href="/play"
-            className="px-4 py-2 bg-purple/20 hover:bg-purple border border-purple/60 hover:border-purple text-primary hover:text-white font-display text-[10px] uppercase tracking-[0.2em] rounded transition-all duration-200 shadow-md hover:shadow-purple/25"
-          >
-            Enter World
-          </Link>
+          <div className="flex gap-2">
+            <Link
+              href="/world"
+              className="px-4 py-2 bg-amber/20 hover:bg-amber border border-amber/60 hover:border-amber text-primary hover:text-void font-display text-[10px] uppercase tracking-[0.2em] rounded transition-all duration-200 shadow-md hover:shadow-amber/25"
+            >
+              🎮 3D World
+            </Link>
+            <Link
+              href="/play"
+              className="px-4 py-2 bg-purple/20 hover:bg-purple border border-purple/60 hover:border-purple text-primary hover:text-white font-display text-[10px] uppercase tracking-[0.2em] rounded transition-all duration-200 shadow-md hover:shadow-purple/25"
+            >
+              💬 Chat UI
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -152,12 +160,18 @@ export default function LandingPage() {
             Forgetting costs 50 gold.
           </p>
 
-          <div className="flex justify-center gap-4 mt-4">
+          <div className="flex flex-wrap justify-center gap-4 mt-4">
+            <Link
+              href="/world"
+              className="px-6 py-3 bg-amber hover:bg-amber-400 text-void text-xs font-display tracking-widest uppercase rounded-lg shadow-lg shadow-amber/20 transition-all duration-200"
+            >
+              🎮 Enter 3D World
+            </Link>
             <Link
               href="/play"
               className="px-6 py-3 bg-purple hover:bg-purple-glow text-white text-xs font-display tracking-widest uppercase rounded-lg shadow-lg shadow-purple/20 transition-all duration-200"
             >
-              Enter Ashenvale →
+              💬 Enter Chat UI
             </Link>
             <a
               href="https://github.com/AmanM006/revenant"
@@ -458,12 +472,20 @@ export default function LandingPage() {
             Ready to give your NPCs a memory?
           </h2>
 
-          <Link
-            href="/play"
-            className="px-8 py-3.5 bg-purple hover:bg-purple-glow text-white text-xs font-display tracking-widest uppercase rounded-lg shadow-lg shadow-purple/20 transition-all duration-200"
-          >
-            Enter Ashenvale →
-          </Link>
+          <div className="flex gap-4">
+            <Link
+              href="/world"
+              className="px-8 py-3.5 bg-amber hover:bg-amber-400 text-void text-xs font-display tracking-widest uppercase rounded-lg shadow-lg shadow-amber/20 transition-all duration-200"
+            >
+              🎮 Enter 3D World
+            </Link>
+            <Link
+              href="/play"
+              className="px-8 py-3.5 bg-purple hover:bg-purple-glow text-white text-xs font-display tracking-widest uppercase rounded-lg shadow-lg shadow-purple/20 transition-all duration-200"
+            >
+              💬 Enter Chat UI
+            </Link>
+          </div>
 
           <p className="text-[9px] font-mono text-muted uppercase tracking-widest mt-4">
             Built for WeMakeDevs × Cognee Hackathon 2026

@@ -11,7 +11,7 @@ interface Props {
   npcName: string;
   gold: number;
   onClose: () => void;
-  onSuccess: (documentId: string, goldRemaining: number) => void;
+  onSuccess: (documentId: string, goldRemaining: number, verifiedDeleted: boolean) => void;
 }
 
 const ENTRY_TYPE_LABELS: Record<string, string> = {
@@ -83,7 +83,7 @@ export function AmnesiaModal({
     try {
       const result = await forgetMemory(npcId, selected);
       setSuccess(result.message);
-      onSuccess(selected, result.gold_remaining);
+      onSuccess(selected, result.gold_remaining, result.verified_deleted);
       setDocs((prev) => prev.filter((d) => d.document_id !== selected));
       setSelected(null);
     } catch (e: unknown) {
@@ -97,7 +97,7 @@ export function AmnesiaModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in pointer-events-auto"
       style={{ background: "rgba(6,8,15,0.85)", backdropFilter: "blur(8px)" }}
     >
       <div className="bg-surface border border-purple/40 rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden animate-slide-up">

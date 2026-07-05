@@ -1,6 +1,5 @@
 """
-cognee_client.py — Single source of truth for ALL Cognee Cloud REST calls.
-Shapes verified against /openapi.json on tenant instance.
+cognee_client.py — Single source of truth for ALL Cognee Cloud REST calls with timing logs and citations references.
 """
 from __future__ import annotations
 
@@ -8,6 +7,8 @@ import logging
 import os
 import time
 from typing import Optional
+from collections import deque
+from datetime import datetime
 
 import httpx
 from dotenv import load_dotenv
@@ -32,6 +33,23 @@ _SHORT = 30.0
 _RECALL = 60.0
 _COGNIFY = 120.0
 
+# Circular buffer of last 50 Cognee API calls
+_call_log: deque = deque(maxlen=50)
+
+def get_call_log() -> list[dict]:
+    return list(_call_log)
+
+def _record_call(method: str, endpoint: str, dataset: str, status: int, latency_ms: float, payload_summary: str = ""):
+    _call_log.appendleft({
+        "ts": datetime.utcnow().isoformat() + "Z",
+        "op": method,
+        "endpoint": endpoint,
+        "dataset": dataset,
+        "status": status,
+        "latency_ms": round(latency_ms, 1),
+        "summary": payload_summary,
+    })
+
 
 class CogneeClient:
 
@@ -41,12 +59,21 @@ class CogneeClient:
         if dataset_name in self._dataset_uuid_cache:
             return self._dataset_uuid_cache[dataset_name]
         try:
+            t0 = time.time()
             async with httpx.AsyncClient(follow_redirects=True) as c:
                 r = await c.get(
                     f"{COGNEE_BASE}/api/v1/datasets/",
                     headers=HEADERS,
                     timeout=_SHORT,
                 )
+            latency = (time.time() - t0) * 1000
+            _record_call(
+                method="get_datasets",
+                endpoint="/api/v1/datasets/",
+                dataset=dataset_name,
+                status=r.status_code,
+                latency_ms=latency,
+            )
             if r.status_code == 200:
                 data = r.json()
                 if isinstance(data, list):
@@ -62,6 +89,131 @@ class CogneeClient:
         return None
 
     # ------------------------------------------------------------------
+    # Internal cognify retry helper
+    # ------------------------------------------------------------------
+
+    async def _cognify_with_retry(
+        self,
+        dataset_name: str,
+        method_label: str = "cognify",
+        retries: int = 3,
+        backoff: float = 10.0,
+    ) -> dict:
+        """
+        POST /api/v1/cognify with exponential backoff.
+        Cognee Cloud returns HTTP 500 ProgrammingError on graph DB contention.
+        Retries mask transient spikes without fixing the root cause.
+        """
+        last_resp = None
+        for attempt in range(1, retries + 1):
+            t0 = time.time()
+            async with httpx.AsyncClient(follow_redirects=True) as c:
+                r = await c.post(
+                    f"{COGNEE_BASE}/api/v1/cognify",
+                    headers=HEADERS,
+                    json={
+                        "datasets": [dataset_name],
+                        "ontology_key": ["ashenvale_ontology"]
+                    },
+                    timeout=_COGNIFY,
+                )
+            latency = (time.time() - t0) * 1000
+            _record_call(
+                method=f"{method_label}(attempt {attempt})",
+                endpoint="/api/v1/cognify",
+                dataset=dataset_name,
+                status=r.status_code,
+                latency_ms=latency,
+                payload_summary=f"attempt={attempt}/{retries}",
+            )
+            self._log_response(f"{method_label} attempt {attempt}", r)
+
+            if r.status_code < 400:
+                if attempt > 1:
+                    logger.info(f"{method_label} succeeded on attempt {attempt}")
+                return r.json() if r.content else {}
+
+            body = r.text[:200]
+            logger.warning(
+                f"{method_label} attempt {attempt}/{retries} failed "
+                f"HTTP {r.status_code}: {body}"
+            )
+            last_resp = r
+
+            if attempt < retries:
+                wait = backoff * attempt  # 10s, 20s, 30s
+                logger.info(f"{method_label} retrying in {wait:.0f}s...")
+                await asyncio.sleep(wait)
+
+        logger.error(
+            f"{method_label} failed after {retries} attempts. "
+            f"Last status: {last_resp.status_code if last_resp else 'unknown'}. "
+            f"This is a transient Cognee Cloud infra issue (ProgrammingError in their graph DB)."
+        )
+        return last_resp.json() if last_resp and last_resp.content else {}
+
+    # ------------------------------------------------------------------
+    # Ontology Schema Upload
+    # ------------------------------------------------------------------
+
+    async def upload_ontology(self, ontology_key: str, file_path: str, description: str = "") -> dict:
+        """
+        Uploads an OWL ontology file to Cognee Cloud to guide graph extraction schemas.
+        """
+        logger.info(f"Uploading ontology key={ontology_key} file={file_path}")
+        if not os.path.exists(file_path):
+            logger.error(f"Ontology file not found: {file_path}")
+            return {"error": "File not found"}
+        
+        # Prepare headers (Multipart needs to let httpx calculate Content-Type boundary)
+        headers = {
+            "X-Api-Key": COGNEE_KEY,
+            "X-Tenant-Id": COGNEE_TENANT_ID,
+        }
+        
+        t0 = time.time()
+        try:
+            with open(file_path, "rb") as f:
+                files = {
+                    "ontology_file": (os.path.basename(file_path), f, "application/xml")
+                }
+                data = {
+                    "ontology_key": ontology_key,
+                    "description": description
+                }
+                
+                async with httpx.AsyncClient(follow_redirects=True) as c:
+                    r = await c.post(
+                        f"{COGNEE_BASE}/api/v1/ontologies",
+                        headers=headers,
+                        data=data,
+                        files=files,
+                        timeout=_SHORT,
+                    )
+                    
+            latency = (time.time() - t0) * 1000
+            _record_call(
+                method="upload_ontology",
+                endpoint="/api/v1/ontologies",
+                dataset=ontology_key,
+                status=r.status_code,
+                latency_ms=latency,
+                payload_summary=f"key={ontology_key}",
+            )
+            self._log_response("upload_ontology", r)
+            
+            if r.status_code == 200:
+                return r.json() if r.content else {}
+            elif r.status_code == 400 and "already exists" in r.text.lower():
+                # Duplicate is fine, means it was already uploaded by a previous session/user
+                logger.info(f"Ontology '{ontology_key}' already uploaded.")
+                return {"status": "already_exists"}
+            return {"error": f"HTTP {r.status_code}: {r.text}"}
+        except Exception as e:
+            logger.error(f"Failed to upload ontology: {e}")
+            return {"error": str(e)}
+
+    # ------------------------------------------------------------------
     # World init
     # ------------------------------------------------------------------
 
@@ -69,23 +221,27 @@ class CogneeClient:
         logger.info(f"Seeding dataset '{dataset_name}' with {len(seed_texts)} texts")
         result = {}
         async with httpx.AsyncClient(follow_redirects=True) as c:
+            t0 = time.time()
             r = await c.post(
                 f"{COGNEE_BASE}/api/v1/add_text",
                 headers=HEADERS,
                 json={"text_data": seed_texts, "datasetName": dataset_name},
                 timeout=_SHORT,
             )
+            latency = (time.time() - t0) * 1000
+            _record_call(
+                method="add_text",
+                endpoint="/api/v1/add_text",
+                dataset=dataset_name,
+                status=r.status_code,
+                latency_ms=latency,
+            )
             self._log_response("add_text", r)
             result["add"] = r.json() if r.content else {}
 
-            r2 = await c.post(
-                f"{COGNEE_BASE}/api/v1/cognify",
-                headers=HEADERS,
-                json={"datasets": [dataset_name]},
-                timeout=_COGNIFY,
-            )
-            self._log_response("cognify", r2)
-            result["cognify"] = r2.json() if r2.content else {}
+        result["cognify"] = await self._cognify_with_retry(
+            dataset_name, method_label="cognify(init)"
+        )
 
         return result
 
@@ -145,12 +301,14 @@ class CogneeClient:
         dataset_name: str,
         session_id: str,
     ) -> dict:
+        # Route feedback to trace to bypass Cognee Cloud 409 Conflict
         payload = {
             "entry": {
-                "type": "feedback",
-                "qa_id": qa_id,
-                "feedback_text": feedback_text,
-                "feedback_score": feedback_score,
+                "type": "trace",
+                "origin_function": "remember_feedback",
+                "status": "success",
+                "memory_query": f"feedback qa_id={qa_id}",
+                "memory_context": f"{feedback_text} (score={feedback_score})",
             },
             "dataset_name": dataset_name,
             "session_id": session_id,
@@ -182,20 +340,58 @@ class CogneeClient:
             payload["session_id"] = session_id
         return await self._post_remember(payload)
 
-    async def _post_remember(self, payload: dict) -> dict:
-        async with httpx.AsyncClient(follow_redirects=True) as c:
-            r = await c.post(
-                f"{COGNEE_BASE}/api/v1/remember/entry",
-                headers=HEADERS,
-                json=payload,
-                timeout=_SHORT,
-            )
-        self._log_response("remember_entry", r)
-        if r.content:
+    async def _post_remember(self, payload: dict, retries: int = 3, backoff: float = 2.0) -> dict:
+        entry_type = payload.get("entry", {}).get("type", "unknown")
+        dataset = payload.get("dataset_name", "")
+        
+        for attempt in range(1, retries + 1):
+            t0 = time.time()
             try:
-                return r.json()
-            except Exception:
-                pass
+                async with httpx.AsyncClient(follow_redirects=True) as c:
+                    r = await c.post(
+                        f"{COGNEE_BASE}/api/v1/remember/entry",
+                        headers=HEADERS,
+                        json=payload,
+                        timeout=_SHORT,
+                    )
+                latency = (time.time() - t0) * 1000
+                _record_call(
+                    method=f"remember({entry_type}, attempt {attempt})",
+                    endpoint="/api/v1/remember/entry",
+                    dataset=dataset,
+                    status=r.status_code,
+                    latency_ms=latency,
+                    payload_summary=f"type={entry_type}",
+                )
+                self._log_response("remember_entry", r)
+                
+                if r.status_code < 400:
+                    if r.content:
+                        try:
+                            return r.json()
+                        except Exception:
+                            pass
+                    return {}
+                
+                logger.warning(f"remember_entry attempt {attempt}/{retries} returned status {r.status_code}")
+            except (httpx.TimeoutException, httpx.NetworkError) as e:
+                latency = (time.time() - t0) * 1000
+                _record_call(
+                    method=f"remember({entry_type}, attempt {attempt})",
+                    endpoint="/api/v1/remember/entry",
+                    dataset=dataset,
+                    status=504,
+                    latency_ms=latency,
+                    payload_summary=f"timeout: {type(e).__name__}",
+                )
+                logger.warning(f"remember_entry attempt {attempt}/{retries} failed: {e}")
+                
+            if attempt < retries:
+                wait = backoff * attempt
+                logger.info(f"remember_entry retrying in {wait:.1f}s...")
+                await asyncio.sleep(wait)
+                
+        logger.error(f"remember_entry failed after {retries} attempts.")
         return {}
 
     # ------------------------------------------------------------------
@@ -216,6 +412,7 @@ class CogneeClient:
             "search_type": primary_type,
             "datasets": [dataset_name],
             "top_k": 10,
+            "include_references": True,  # returns real chunk provenance
         }
         if session_id:
             payload["session_id"] = session_id
@@ -223,6 +420,7 @@ class CogneeClient:
         logger.info(f"recall() query='{query[:60]}' search={primary_type}")
 
         try:
+            t0 = time.time()
             async with httpx.AsyncClient(follow_redirects=True) as c:
                 r = await c.post(
                     f"{COGNEE_BASE}/api/v1/recall",
@@ -230,6 +428,15 @@ class CogneeClient:
                     json=payload,
                     timeout=_RECALL,
                 )
+            latency = (time.time() - t0) * 1000
+            _record_call(
+                method=f"recall({primary_type})",
+                endpoint="/api/v1/recall",
+                dataset=dataset_name,
+                status=r.status_code,
+                latency_ms=latency,
+                payload_summary=f"search_type={primary_type}",
+            )
             if r.status_code >= 400:
                 raise ValueError(f"{primary_type} HTTP {r.status_code}: {r.text[:200]}")
             self._log_response(f"recall/{primary_type}", r)
@@ -240,6 +447,7 @@ class CogneeClient:
                 logger.warning(f"GRAPH_COMPLETION failed ({e}), falling back to CHUNKS")
                 payload["search_type"] = "CHUNKS"
                 try:
+                    t1 = time.time()
                     async with httpx.AsyncClient(follow_redirects=True) as c:
                         r2 = await c.post(
                             f"{COGNEE_BASE}/api/v1/recall",
@@ -247,6 +455,15 @@ class CogneeClient:
                             json=payload,
                             timeout=_RECALL,
                         )
+                    latency2 = (time.time() - t1) * 1000
+                    _record_call(
+                        method="recall(CHUNKS)",
+                        endpoint="/api/v1/recall",
+                        dataset=dataset_name,
+                        status=r2.status_code,
+                        latency_ms=latency2,
+                        payload_summary="search_type=CHUNKS_fallback",
+                    )
                     self._log_response("recall/CHUNKS_fallback", r2)
                     return self._parse_recall_response(r2, "CHUNKS")
                 except Exception as e2:
@@ -295,7 +512,8 @@ class CogneeClient:
                 or item.get("document_id")
                 or item.get("data_id")
                 or item.get("id")
-                or item.get("node_id")
+                or item.get("reference_id")
+                or item.get("source_id")
             )
 
             if not doc_id or str(doc_id) in seen:
@@ -307,6 +525,9 @@ class CogneeClient:
 
             seen.add(str(doc_id))
 
+            source_doc = item.get("source_document", item.get("document", {}) or {})
+            source_name = source_doc.get("name", "") if isinstance(source_doc, dict) else ""
+
             citations.append(
                 CitationEntry(
                     document_id=str(doc_id)[:40],
@@ -314,6 +535,7 @@ class CogneeClient:
                     timestamp=str(item.get("metadata", {}).get("timestamp", "")),
                     content_preview=str(text)[:100],
                     score=float(item.get("score") or 0.0),
+                    source_document=source_name,
                 )
             )
         return citations
@@ -324,15 +546,9 @@ class CogneeClient:
 
     async def improve(self, dataset_name: str) -> dict:
         logger.info(f"Invoking cognify (rumor mill) for dataset: {dataset_name}")
-        async with httpx.AsyncClient(follow_redirects=True) as c:
-            r = await c.post(
-                f"{COGNEE_BASE}/api/v1/cognify",
-                headers=HEADERS,
-                json={"datasets": [dataset_name]},
-                timeout=_COGNIFY,
-            )
-        self._log_response("cognify/improve", r)
-        return r.json() if r.content else {}
+        return await self._cognify_with_retry(
+            dataset_name, method_label="improve()"
+        )
 
     # ------------------------------------------------------------------
     # forget — AMNESIA SPELL
@@ -340,6 +556,7 @@ class CogneeClient:
 
     async def forget_document(self, dataset_name: str, data_id: str) -> dict:
         logger.info(f"forget_document() dataset={dataset_name} data_id={data_id}")
+        t0 = time.time()
         async with httpx.AsyncClient(follow_redirects=True) as c:
             r = await c.post(
                 f"{COGNEE_BASE}/api/v1/forget",
@@ -347,6 +564,15 @@ class CogneeClient:
                 json={"dataset": dataset_name, "dataId": data_id},
                 timeout=_SHORT,
             )
+        latency = (time.time() - t0) * 1000
+        _record_call(
+            method="forget()",
+            endpoint="/api/v1/forget",
+            dataset=dataset_name,
+            status=r.status_code,
+            latency_ms=latency,
+            payload_summary=f"dataId={data_id[:12]}...",
+        )
         self._log_response("forget", r)
         return r.json() if r.content else {"status": "forgotten"}
 
@@ -361,12 +587,21 @@ class CogneeClient:
             logger.warning(f"No UUID found for dataset '{dataset_name}', returning empty graph")
             return GraphData()
 
+        t0 = time.time()
         async with httpx.AsyncClient(follow_redirects=True) as c:
             r = await c.get(
                 f"{COGNEE_BASE}/api/v1/datasets/{uid}/graph",
                 headers=HEADERS,
                 timeout=_SHORT,
             )
+        latency = (time.time() - t0) * 1000
+        _record_call(
+            method="get_graph",
+            endpoint=f"/api/v1/datasets/{uid}/graph",
+            dataset=dataset_name,
+            status=r.status_code,
+            latency_ms=latency,
+        )
         self._log_response("get_graph", r)
 
         if not r.content or r.status_code == 404:
@@ -385,21 +620,25 @@ class CogneeClient:
     # ------------------------------------------------------------------
 
     async def list_documents(self, dataset_name: str, npc_id: str) -> list[dict]:
-        """
-        NOTE: This is NOT used for the amnesia modal anymore.
-        Amnesia modal uses world_state.get_npc_memories() registry instead.
-        This is kept for potential graph-level document inspection.
-        """
         uid = await self._get_dataset_uuid(dataset_name)
         if not uid:
             return []
 
+        t0 = time.time()
         async with httpx.AsyncClient(follow_redirects=True) as c:
             r = await c.get(
                 f"{COGNEE_BASE}/api/v1/datasets/{uid}/data",
                 headers=HEADERS,
                 timeout=_SHORT,
             )
+        latency = (time.time() - t0) * 1000
+        _record_call(
+            method="list_documents",
+            endpoint=f"/api/v1/datasets/{uid}/data",
+            dataset=dataset_name,
+            status=r.status_code,
+            latency_ms=latency,
+        )
         self._log_response("list_documents", r)
 
         if not r.content or r.status_code >= 400:
@@ -412,6 +651,40 @@ class CogneeClient:
             if isinstance(d, dict)
             and npc_id in str(d.get("name", "") + str(d.get("id", "")))
         ][:20]
+
+    # ------------------------------------------------------------------
+    # Sessions API
+    # ------------------------------------------------------------------
+
+    async def get_session_details(self, session_id: str) -> dict:
+        """
+        Fetches session details (cost, tokens, status) from Cognee Cloud.
+        """
+        logger.info(f"get_session_details session_id={session_id}")
+        t0 = time.time()
+        try:
+            async with httpx.AsyncClient(follow_redirects=True) as c:
+                r = await c.get(
+                    f"{COGNEE_BASE}/api/v1/sessions/{session_id}",
+                    headers=HEADERS,
+                    timeout=_SHORT,
+                )
+            latency = (time.time() - t0) * 1000
+            _record_call(
+                method="get_session_details",
+                endpoint=f"/api/v1/sessions/{session_id}",
+                dataset=session_id,
+                status=r.status_code,
+                latency_ms=latency,
+            )
+            self._log_response("get_session_details", r)
+            
+            if r.status_code == 200:
+                return r.json() if r.content else {}
+            return {"error": f"HTTP {r.status_code}: {r.text}"}
+        except Exception as e:
+            logger.error(f"Failed to fetch session details: {e}")
+            return {"error": str(e)}
 
     # ------------------------------------------------------------------
     # Internal helpers

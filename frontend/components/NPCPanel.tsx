@@ -20,7 +20,7 @@ interface NpcData {
 interface Props {
   npcs: NpcData[];
   selectedNpc: NpcId;
-  loadingNpc?: string | null;
+  loadingNpcs?: Record<NpcId, boolean>;
   onSelect: (id: NpcId) => void;
 }
 
@@ -107,7 +107,7 @@ function trajectoryDisplay(t: Trajectory): { label: string; className: string } 
   }
 }
 
-export function NPCPanel({ npcs, selectedNpc, loadingNpc, onSelect }: Props) {
+export function NPCPanel({ npcs, selectedNpc, loadingNpcs, onSelect }: Props) {
   return (
     <div className="flex flex-col gap-3 h-full overflow-y-auto pr-1">
       <h2 className="text-xs font-display tracking-widest text-muted uppercase font-semibold mb-1 px-1">
@@ -130,7 +130,7 @@ export function NPCPanel({ npcs, selectedNpc, loadingNpc, onSelect }: Props) {
                 isSelected
                   ? "border-purple bg-raised shadow-[0_0_20px_rgba(124,58,237,0.15)] border-l-[3px] border-l-purple-glow"
                   : lowTrust
-                  ? "border-red/40 bg-surface hover:border-red/60 hover:bg-hover shadow-[0_0_12px_rgba(239,68,68,0.1)]"
+                  ? "border-red/40 bg-surface hover:border-red/60 hover:bg-hover shadow-[0_0_12px_rgba(239,68,68,0.45)]"
                   : "border-border bg-surface hover:border-bright hover:bg-hover"
               }
             `}
@@ -140,7 +140,7 @@ export function NPCPanel({ npcs, selectedNpc, loadingNpc, onSelect }: Props) {
 
             {/* Portrait area */}
             <div className={`relative aspect-video w-full rounded-lg overflow-hidden mb-3 border bg-void transition-all duration-300 ${
-              loadingNpc === npc.id ? "border-purple ring-2 ring-purple/50 animate-pulse" : "border-border"
+              loadingNpcs?.[npc.id] ? "border-purple ring-2 ring-purple/50 animate-pulse" : "border-border"
             }`}>
               <PortraitComponent id={npc.id} />
               {/* Runic border overlay */}
