@@ -13,9 +13,16 @@ export default function ViewPage() {
   const [gameDay, setGameDay] = useState(1);
   const [worldId, setWorldId] = useState<string | null>(null);
 
-  // Initialize worldId from sessionStorage on client load
+  // Initialize worldId from query params or sessionStorage on client load
   useEffect(() => {
-    setWorldId(getWorldId());
+    const params = new URLSearchParams(window.location.search);
+    const queryId = params.get("world_id");
+    if (queryId) {
+      sessionStorage.setItem("revenant_world_id", queryId);
+      setWorldId(queryId);
+    } else {
+      setWorldId(getWorldId());
+    }
   }, []);
 
   const fetchGraph = useCallback(async () => {
