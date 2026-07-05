@@ -3,7 +3,7 @@
 
 > Revenant proves that graph-vector memory can power emergent social AI at zero scripting cost — a pattern applicable to any multi-agent system where agents must share evolving context.
 
-**[▶ Play Live](https://revenant.vercel.app)** · **[Demo Video →](#)** · WeMakeDevs × Cognee Hackathon 2026
+**[▶ Play Live](https://revenant.vercel.app)** · **[Demo Video →](https://www.youtube.com/watch?v=MPwkMDQzNWQ)** · WeMakeDevs × Cognee Hackathon 2026
 
 ---
 
