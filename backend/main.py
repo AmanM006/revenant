@@ -669,37 +669,38 @@ async def get_graph(world_id: str) -> dict:
 
     # 3. Inject active memory nodes so the Amnesia spell can show them dissolving!
     from backend.world_state import get_npc_memories
-    active_mems = []
-    for npc_id in ["silas", "elara", "kael"]:
-        active_mems.extend(get_npc_memories(world_id, npc_id))
-
     links = []
     existing_edges = set()
 
-    for mem in active_mems:
-        doc_id = mem["document_id"]
-        desc = mem["description"]
-        if doc_id not in {n["id"] for n in nodes}:
+    for npc_id in ["silas", "elara", "kael"]:
+        mems = get_npc_memories(world_id, npc_id)
+        for mem in mems:
+            doc_id = mem["document_id"]
+            desc = mem["description"]
             is_rumor_mem = "rumor" in doc_id or "steal" in desc.lower() or "betray" in desc.lower()
             m_type = "rumor" if is_rumor_mem else "trust"
-            nodes.append({
-                "id": doc_id,
-                "label": f"Memory: {desc[:20]}...",
-                "name": desc,
-                "nodeType": m_type,
-                "color": _node_color(m_type),
-            })
-            # Connect owner NPC to the memory node
-            npc_owner = next((npc for npc in ["silas", "elara", "kael"] if npc in doc_id), None)
-            if npc_owner and npc_owner in node_id_map:
-                links.append({
-                    "source": node_id_map[npc_owner],
-                    "target": doc_id,
-                    "type": "contains",
-                    "edgeType": m_type,
-                    "color": _edge_color(m_type),
+
+            if doc_id not in {n["id"] for n in nodes}:
+                nodes.append({
+                    "id": doc_id,
+                    "label": f"Memory: {desc[:20]}...",
+                    "name": desc,
+                    "nodeType": m_type,
+                    "color": _node_color(m_type),
                 })
-                existing_edges.add((node_id_map[npc_owner], doc_id))
+            
+            # Connect owner NPC to the memory node
+            if npc_id in node_id_map:
+                edge_key = (node_id_map[npc_id], doc_id)
+                if edge_key not in existing_edges:
+                    links.append({
+                        "source": node_id_map[npc_id],
+                        "target": doc_id,
+                        "type": "contains",
+                        "edgeType": m_type,
+                        "color": _edge_color(m_type),
+                    })
+                    existing_edges.add(edge_key)
 
     # 4. Map Cognee's returned edges
     for e in graph_data.edges:
