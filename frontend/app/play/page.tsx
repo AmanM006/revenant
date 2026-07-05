@@ -227,8 +227,8 @@ export default function PlayPage() {
     }
   }, [worldId]);
 
-  const handleGraphUpdated = useCallback((nodes: GraphNode[], edges: GraphLink[]) => {
-    setGraphData({ nodes, links: edges });
+  const handleGraphUpdated = useCallback(() => {
+    getGraph().then(g => setGraphData(g)).catch(() => {});
     showToast("Knowledge graph updated by improve().", "success");
   }, []);
 
