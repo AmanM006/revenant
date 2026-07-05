@@ -468,6 +468,73 @@ async def rumor_mill(body: RumorMillRequest) -> RumorMillResponse:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/world/{world_id}/reset")
+async def reset_world(world_id: str) -> dict:
+    """
+    Full administrative reset of the world state:
+    1. Deletes all registered memories for this world from Cognee Cloud.
+    2. Wipes the memory registry and resets gold to 200.
+    3. Resets NPC trust scores back to their initial levels.
+    """
+    require_world(world_id)
+    from backend.world_state import _worlds, _memory_registry, get_npc_memories, NPC_DEFINITIONS
+    from backend.cognee_client import cognee
+    from backend.schemas import TrustHistoryEntry
+
+    dataset_name = f"world_{world_id}"
+
+    # 1. Gather and delete all registered memories from Cognee Cloud
+    deleted_count = 0
+    for npc_id in ["silas", "elara", "kael"]:
+        mems = get_npc_memories(world_id, npc_id)
+        for mem in mems:
+            doc_id = mem["document_id"]
+            try:
+                await cognee.forget_document(dataset_name, doc_id)
+                deleted_count += 1
+            except Exception as e:
+                logger.error(f"Failed to delete {doc_id} during reset: {e}")
+
+    # 2. Reset world state variables
+    if world_id in _worlds:
+        state = _worlds[world_id]
+        state.gold = 200
+        state.game_day = 1
+        for npc_id, npc in NPC_DEFINITIONS.items():
+            state.trust[npc_id] = npc.initial_trust
+            state.trust_history[npc_id] = [
+                TrustHistoryEntry(day=0, score=npc.initial_trust, event="init", delta=0)
+            ]
+            state.conversation_history[npc_id] = []
+
+    # 3. Clear memory registry
+    if world_id in _memory_registry:
+        _memory_registry[world_id] = {}
+
+    # Broadcast reset to update UI
+    if ws_manager:
+        await ws_manager.broadcast(
+            world_id,
+            {"type": "day_advanced", "game_day": 1}
+        )
+        for npc_id, npc in NPC_DEFINITIONS.items():
+            await ws_manager.broadcast(
+                world_id,
+                {"type": "trust_update", "npc_id": npc_id, "score": npc.initial_trust, "reason": "reset"}
+            )
+        # Force graph update event to clear the layout
+        await ws_manager.broadcast(
+            world_id,
+            {"type": "graph_updated"}
+        )
+
+    return {
+        "status": "success",
+        "deleted_memories_count": deleted_count,
+        "message": f"World {world_id} fully reset. trust/gold restored. {deleted_count} Cognee memories wiped."
+    }
+
+
 # ---------------------------------------------------------------------------
 # Sessions details (Cognitive Diagnostics)
 # ---------------------------------------------------------------------------
