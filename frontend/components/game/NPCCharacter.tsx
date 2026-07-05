@@ -1,6 +1,5 @@
 import { useRef } from "react"
 import { useFrame } from "@react-three/fiber"
-import { Html } from "@react-three/drei"
 import { useGameStore } from "./store"
 import * as THREE from "three"
 
@@ -84,14 +83,6 @@ export function NPCCharacter({ id, name, position, color, glowColor }: NPCProps)
         <meshStandardMaterial color={glowColor} />
       </mesh>
 
-      {/* Name label above NPC */}
-      {isNear && (
-        <Html position={[0, 2.0, 0]} center distanceFactor={15}>
-          <div className="bg-[#06080F]/90 text-white font-mono text-[10px] px-2 py-0.5 rounded border border-border/40 shadow-lg whitespace-nowrap pointer-events-none select-none uppercase tracking-wider">
-            {name || id}
-          </div>
-        </Html>
-      )}
     </group>
   )
 }
