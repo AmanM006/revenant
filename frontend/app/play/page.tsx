@@ -524,13 +524,12 @@ export default function PlayPage() {
             <h2 className="text-[11px] font-display font-semibold uppercase tracking-[0.2em] text-muted">
               Cognee Knowledge Graph
             </h2>
-            <a
-              href={`/view?world_id=${worldId}`}
-              target="_blank"
-              className="text-[9px] font-mono text-purple hover:underline font-bold uppercase tracking-wider flex items-center gap-1"
-            >
-              🕸️ Full Screen
-            </a>
+            <div className="flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-green animate-pulse" />
+              <span className="text-[9px] font-mono text-green uppercase tracking-wider font-semibold">
+                Live
+              </span>
+            </div>
           </div>
           <div className="flex-1 min-h-0">
             <GraphPanel
