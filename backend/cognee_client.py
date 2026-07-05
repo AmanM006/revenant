@@ -11,6 +11,7 @@ from collections import deque
 from datetime import datetime
 
 import httpx
+import asyncio
 from dotenv import load_dotenv
 
 from backend.schemas import CitationEntry, GraphData, RecallResult

@@ -84,16 +84,13 @@ async def trigger_rumor_mill(
             )
 
             try:
-                await cognee.remember_skill_run(
-                    run_id=doc_id,
-                    skill_id="rumor_propagation",
-                    task_text=(
-                        f"{source_npc.name} warns {target_npc.name} about the player. "
-                        f"Trust score={trust}/100, below warning threshold."
-                    ),
-                    result_summary=content,
+                # Use remember_qa which is globally supported and doesn't require a registered skill ID
+                session_id = f"session_{world_id}_{source_npc_id}"
+                await cognee.remember_qa(
+                    question=f"What rumor did {source_npc.name} spread about the player to {target_npc.name}?",
+                    answer=content,
                     dataset_name=dataset_name,
-                    success_score=1.0,
+                    session_id=session_id,
                 )
                 rumors_injected += 1
                 logger.info(
