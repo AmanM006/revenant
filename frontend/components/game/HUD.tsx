@@ -136,11 +136,15 @@ export function HUD() {
       next.add(docId);
       return next;
     });
-    setTimeout(() => setDissolvingNodes(p => {
-      const n = new Set(p);
-      n.delete(docId);
-      return n;
-    }), 1200);
+    setTimeout(() => {
+      setDissolvingNodes(p => {
+        const n = new Set(p);
+        n.delete(docId);
+        return n;
+      });
+      // Fetch updated graph to remove the node and its links permanently
+      getGraph().then(g => setGraphData(g)).catch(() => {});
+    }, 1200);
   }, []);
 
   const handleTrustUpdate = useCallback(async (npcId: NpcId, score: number) => {

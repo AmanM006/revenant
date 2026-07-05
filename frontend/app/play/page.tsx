@@ -215,6 +215,8 @@ export default function PlayPage() {
         next.delete(documentId);
         return next;
       });
+      // Fetch updated graph to remove the node and its links permanently
+      getGraph().then((g) => setGraphData(g)).catch(() => {});
     }, 1200);
   }, []);
 
