@@ -628,14 +628,15 @@ async def get_graph(world_id: str) -> dict:
         label = str(n.get("label") or n.get("name") or "").lower()
         node_type = _classify_node_type(n)
         
-        # Save mappings for overlays
-        if "silas" in label or node_id == "silas":
+        # Save mappings for overlays using exact label matches
+        label_clean = label.strip().lower()
+        if label_clean == "silas" or node_id == "silas":
             node_id_map["silas"] = node_id
-        elif "elara" in label or node_id == "elara":
+        elif label_clean == "elara" or node_id == "elara":
             node_id_map["elara"] = node_id
-        elif "kael" in label or node_id == "kael":
+        elif label_clean == "kael" or node_id == "kael":
             node_id_map["kael"] = node_id
-        elif "player" in label or node_id == "player":
+        elif label_clean == "player" or node_id == "player":
             node_id_map["player"] = node_id
 
         nodes.append({
@@ -689,14 +690,14 @@ async def get_graph(world_id: str) -> dict:
                 "color": _node_color(m_type),
             })
             # Connect owner NPC to the memory node
-            npc_owner = next((npc for npc in ["silas", "elara", "kael"] if npc in doc_id or npc_id in doc_id), None)
+            npc_owner = next((npc for npc in ["silas", "elara", "kael"] if npc in doc_id), None)
             if npc_owner and npc_owner in node_id_map:
                 links.append({
                     "source": node_id_map[npc_owner],
                     "target": doc_id,
                     "type": "contains",
-                    "edgeType": "event",
-                    "color": "#64748B",
+                    "edgeType": m_type,
+                    "color": _edge_color(m_type),
                 })
                 existing_edges.add((node_id_map[npc_owner], doc_id))
 

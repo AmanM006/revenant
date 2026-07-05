@@ -399,6 +399,7 @@ export function HUD() {
             {showGraph ? "📊" : "📉"} Graph
           </button>
           <a href="/play" className="hud-switch-btn">📜 Full UI</a>
+          <a href="/view" target="_blank" className="hud-switch-btn font-bold text-purple border-purple/60 hover:bg-purple/10">🕸️ View Graph</a>
         </div>
       </div>
 

@@ -261,7 +261,7 @@ export function GraphPanel({ graphData, dissolvingNodes, pulsatingEdges, current
             const l = link as GraphLink;
             if (l.edgeType === "rumor") return "rgba(239, 68, 68, 0.95)"; // bright red
             if (l.edgeType === "trust") return "rgba(34, 197, 94, 0.95)"; // bright green
-            return "rgba(30, 42, 69, 0.8)"; // near-invisible default
+            return "rgba(148, 163, 184, 0.35)"; // visible default slate
           }}
           linkWidth={(link: any) => {
             const l = link as GraphLink;
