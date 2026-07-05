@@ -344,7 +344,7 @@ def register_memory(
             "type": entry_type,
             "game_day": game_day,
             "timestamp": "",
-            "content_preview": description[:100],
+            "content_preview": description[:300],
         })
         logger.debug(f"Memory registered: world={world_id} npc={npc_id} doc={doc_id}")
 

@@ -620,22 +620,132 @@ async def get_graph(world_id: str) -> dict:
 
     # Transform for react-force-graph-2d: edges become "links"
     nodes = []
+    node_id_map = {}
+
+    # 1. Process Cognee Cloud's returned nodes
     for n in graph_data.nodes:
+        node_id = str(n.get("id") or "")
+        label = str(n.get("label") or n.get("name") or "").lower()
         node_type = _classify_node_type(n)
+        
+        # Save mappings for overlays
+        if "silas" in label or node_id == "silas":
+            node_id_map["silas"] = node_id
+        elif "elara" in label or node_id == "elara":
+            node_id_map["elara"] = node_id
+        elif "kael" in label or node_id == "kael":
+            node_id_map["kael"] = node_id
+        elif "player" in label or node_id == "player":
+            node_id_map["player"] = node_id
+
         nodes.append({
             **n,
             "nodeType": node_type,
             "color": _node_color(node_type),
         })
 
+    # 2. Inject core nodes if they aren't already present in Cognee's returned data
+    if "player" not in node_id_map:
+        nodes.append({
+            "id": "player",
+            "label": "Player",
+            "name": "Player",
+            "nodeType": "player",
+            "color": "#F8FAFC",
+        })
+        node_id_map["player"] = "player"
+
+    for npc_name, display_name in [("silas", "Silas"), ("elara", "Elara"), ("kael", "Kael")]:
+        if npc_name not in node_id_map:
+            nodes.append({
+                "id": npc_name,
+                "label": display_name,
+                "name": display_name,
+                "nodeType": "npc",
+                "color": "#7C3AED",
+            })
+            node_id_map[npc_name] = npc_name
+
+    # 3. Inject active memory nodes so the Amnesia spell can show them dissolving!
+    from backend.world_state import get_npc_memories
+    active_mems = []
+    for npc_id in ["silas", "elara", "kael"]:
+        active_mems.extend(get_npc_memories(world_id, npc_id))
+
     links = []
+    existing_edges = set()
+
+    for mem in active_mems:
+        doc_id = mem["document_id"]
+        desc = mem["description"]
+        if doc_id not in {n["id"] for n in nodes}:
+            is_rumor_mem = "rumor" in doc_id or "steal" in desc.lower() or "betray" in desc.lower()
+            m_type = "rumor" if is_rumor_mem else "trust"
+            nodes.append({
+                "id": doc_id,
+                "label": f"Memory: {desc[:20]}...",
+                "name": desc,
+                "nodeType": m_type,
+                "color": _node_color(m_type),
+            })
+            # Connect owner NPC to the memory node
+            npc_owner = next((npc for npc in ["silas", "elara", "kael"] if npc in doc_id or npc_id in doc_id), None)
+            if npc_owner and npc_owner in node_id_map:
+                links.append({
+                    "source": node_id_map[npc_owner],
+                    "target": doc_id,
+                    "type": "contains",
+                    "edgeType": "event",
+                    "color": "#64748B",
+                })
+                existing_edges.add((node_id_map[npc_owner], doc_id))
+
+    # 4. Map Cognee's returned edges
     for e in graph_data.edges:
-        edge_type = e.get("type", "event")
+        src = str(e.get("source") or "")
+        tgt = str(e.get("target") or "")
+        edge_type = _classify_edge_type(e)
+        existing_edges.add((src, tgt))
         links.append({
             **e,
             "edgeType": edge_type,
             "color": _edge_color(edge_type),
         })
+
+    # 5. Dynamic Trust Overlay (Player → NPCs, Green solid lines)
+    for npc_id in ["silas", "elara", "kael"]:
+        t_val = get_trust(world_id, npc_id)
+        src_id = node_id_map["player"]
+        tgt_id = node_id_map[npc_id]
+        if (src_id, tgt_id) not in existing_edges:
+            links.append({
+                "source": src_id,
+                "target": tgt_id,
+                "type": f"trusts_{t_val}",
+                "edgeType": "trust",
+                "label": f"Trust: {t_val}/100",
+                "color": "#22C55E",
+            })
+            existing_edges.add((src_id, tgt_id))
+
+    # 6. Dynamic Rumor Propagation Overlay (NPC → NPC, Orange dotted links)
+    for source_npc in ["silas", "elara", "kael"]:
+        t_val = get_trust(world_id, source_npc)
+        if t_val < 40:
+            for target_npc in ["silas", "elara", "kael"]:
+                if target_npc != source_npc:
+                    src_id = node_id_map[source_npc]
+                    tgt_id = node_id_map[target_npc]
+                    if (src_id, tgt_id) not in existing_edges:
+                        links.append({
+                            "source": src_id,
+                            "target": tgt_id,
+                            "type": "warns",
+                            "edgeType": "rumor",
+                            "label": f"{source_npc.capitalize()} warns {target_npc.capitalize()}",
+                            "color": "#F97316",
+                        })
+                        existing_edges.add((src_id, tgt_id))
 
     return {"nodes": nodes, "links": links}
 
@@ -721,15 +831,30 @@ def _describe_document(doc_id: str, doc_type: str, npc_name: str) -> str:
 
 
 def _classify_node_type(node: dict[str, Any]) -> str:
-    label = str(node.get("label", node.get("type", ""))).lower()
-    doc_id = str(node.get("document_id", node.get("id", ""))).lower()
-    if any(k in label for k in ["npc", "silas", "elara", "kael"]):
+    name = str(node.get("name") or "").lower()
+    label = str(node.get("label") or "").lower()
+    node_id = str(node.get("id") or "").lower()
+    node_type = str(node.get("type") or "").lower()
+    doc_id = str(node.get("document_id") or "").lower()
+
+    if any(k in name or k in label or k in node_id for k in ["silas", "elara", "kael"]):
         return "npc"
-    if "player" in label:
+    if "player" in name or "player" in label or "player" in node_id:
         return "player"
-    if "rumor" in doc_id or "rumor" in label:
+    if "rumor" in name or "rumor" in label or "rumor" in node_id or "rumor" in doc_id or "warn" in name or "warn" in label:
         return "rumor"
-    if "trust" in doc_id or "feedback" in doc_id:
+    if "trust" in name or "trust" in label or "trust" in node_id or "feedback" in doc_id:
+        return "trust"
+    if "npc" in node_type or "person" in node_type:
+        return "npc"
+    return "event"
+
+
+def _classify_edge_type(edge: dict[str, Any]) -> str:
+    rel_type = str(edge.get("type") or edge.get("label") or "").lower()
+    if any(k in rel_type for k in ["rumor", "warn", "spread", "betray", "steal", "suspicious"]):
+        return "rumor"
+    if any(k in rel_type for k in ["trust", "friend", "ally", "favor"]):
         return "trust"
     return "event"
 

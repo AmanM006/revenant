@@ -131,16 +131,20 @@ export function HUD() {
   }, [])
 
   const handleNodeDissolve = useCallback((docId: string) => {
-    setDissolvingNodes(p => new Set([...p, docId]))
-    setTimeout(() => setDissolvingNodes(p => { const n = new Set(p); n.delete(docId); return n }), 1200)
-  }, [])
+    setDissolvingNodes(p => {
+      const next = new Set(p);
+      next.add(docId);
+      return next;
+    });
+    setTimeout(() => setDissolvingNodes(p => {
+      const n = new Set(p);
+      n.delete(docId);
+      return n;
+    }), 1200);
+  }, []);
 
   const handleTrustUpdate = useCallback(async (npcId: NpcId, score: number) => {
     setTrust(p => ({ ...p, [npcId]: score }))
-    try {
-      const tl = await getTrustTimeline(npcId)
-      setTrajectories(p => ({ ...p, [npcId]: tl.trajectory }))
-    } catch {}
   }, [])
 
   const handleGraphUpdated = useCallback((nodes: GraphNode[], edges: GraphLink[]) => {
@@ -499,7 +503,7 @@ export function HUD() {
                         {msg.trust_delta > 0 ? `▲ +${msg.trust_delta}` : `▼ ${msg.trust_delta}`}
                       </span>
                     )}
-                    {msg.action && msg.action !== "none" && msg.action !== "neutral" && (
+                    {msg.action && msg.action !== "none" && (
                       <span className="hud-chat-action">[{msg.action}]</span>
                     )}
                     {hasEvidence && (

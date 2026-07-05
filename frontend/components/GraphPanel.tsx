@@ -80,16 +80,12 @@ export function GraphPanel({ graphData, dissolvingNodes, pulsatingEdges }: Props
       const labelText = String(node.label ?? node.id ?? "");
       const lowercaseLabel = labelText.toLowerCase();
 
-      const isNPC = ["silas", "elara", "kael"].some((n) => lowercaseLabel.includes(n));
-      const isPlayer = lowercaseLabel.includes("player");
-      const isRumor = lowercaseLabel.includes("rumor") || lowercaseLabel.includes("warn");
-      const isTrust = lowercaseLabel.includes("trust") || lowercaseLabel.includes("feedback");
+      const isNPC = node.nodeType === "npc";
+      const isPlayer = node.nodeType === "player";
+      const isRumor = node.nodeType === "rumor";
+      const isTrust = node.nodeType === "trust";
 
-      let color = "#3B82F6";
-      if (isNPC) color = "#7C3AED";
-      else if (isPlayer) color = "#F8FAFC";
-      else if (isRumor) color = "#F97316";
-      else if (isTrust) color = "#F59E0B";
+      const color = node.color || "#3B82F6";
 
       let radius = isNPC ? 10 : 5;
       let alpha = 1;
@@ -148,21 +144,25 @@ export function GraphPanel({ graphData, dissolvingNodes, pulsatingEdges }: Props
           backgroundColor="#06080F"
           nodeCanvasObject={nodeCanvasObject}
           nodeRelSize={6}
-          linkColor={(link) => {
+          linkColor={(link: any) => {
             const l = link as GraphLink;
-            if (l.edgeType === "rumor") return "rgba(180, 100, 20, 0.6)"; // deep amber, NOT bright orange
-            if (l.edgeType === "trust") return "rgba(16, 185, 129, 0.4)"; // muted green
+            if (l.edgeType === "rumor") return "rgba(249, 115, 22, 0.85)"; // vibrant orange-red
+            if (l.edgeType === "trust") return "rgba(34, 197, 94, 0.8)"; // bright green
             return "rgba(30, 42, 69, 0.8)"; // near-invisible default
           }}
-          linkWidth={(link) => {
+          linkWidth={(link: any) => {
             const l = link as GraphLink;
             return l.edgeType === "rumor" ? 2 : 1;
           }}
-          linkDirectionalParticles={(link) => {
+          linkLineDash={(link: any) => {
+            const l = link as GraphLink;
+            return l.edgeType === "rumor" ? [3, 2] : null;
+          }}
+          linkDirectionalParticles={(link: any) => {
             const l = link as GraphLink;
             return l.edgeType === "rumor" ? 4 : 0;
           }}
-          linkDirectionalParticleColor={() => "rgba(180, 100, 20, 0.8)"}
+          linkDirectionalParticleColor={() => "rgba(249, 115, 22, 0.9)"}
           linkDirectionalParticleSpeed={0.005}
           cooldownTicks={100}
         />

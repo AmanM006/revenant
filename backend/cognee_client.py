@@ -534,7 +534,7 @@ class CogneeClient:
                     document_id=str(doc_id)[:40],
                     type=item.get("kind", item.get("search_type", search_type)),
                     timestamp=str(item.get("metadata", {}).get("timestamp", "")),
-                    content_preview=str(text)[:100],
+                    content_preview=str(text)[:300],
                     score=float(item.get("score") or 0.0),
                     source_document=source_name,
                 )
