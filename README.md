@@ -1,7 +1,7 @@
-# ⚔ REVENANT
-### Cognitive State Engine for Living NPC Worlds
+# 🧠 REVENANT
+### Cognitive Middleware Infrastructure for Multi-Agent Systems
 
-> The first NPC engine where rumors are graph edges, trust is bi-temporal, and forgetting costs gold.
+> Revenant proves that graph-vector memory can power emergent social AI at zero scripting cost — a pattern applicable to any multi-agent system where agents must share evolving context.
 
 **[▶ Play Live](https://revenant.vercel.app)** · **[Demo Video →](#)** · WeMakeDevs × Cognee Hackathon 2026
 
@@ -9,18 +9,20 @@
 
 ## What Is This?
 
-**Revenant** is a game world where NPCs have *persistent, evolving social memory* powered by [Cognee Cloud](https://cognee.ai). There are no scripted dialogue trees and no hardcoded flags. Every interaction — a betrayal, a bribe, a secret shared — is written into a hybrid graph-vector knowledge store. Rumors propagate across the NPC network through Cognee's graph enrichment pipeline. You can surgically erase a specific memory from an NPC's mind for 50 gold.
+**Revenant** is a cognitive middleware architecture demonstrating how hybrid graph-vector memory pipelines can replace brittle, hardcoded script state in multi-agent environments. Using a living medieval game world as its target demonstration vehicle, it proves that autonomous agents can dynamically acquire, propagate, and forget social context without handwritten dialogue trees or database flags.
 
-There are two ways to experience it:
+Every interaction — a betrayal, a bribe, a secret shared — is written into a hybrid graph-vector knowledge store powered by [Cognee Cloud](https://cognee.ai). Rumors propagate across the NPC agent network through Cognee's graph enrichment pipeline. A player or external coordinator can surgically prune a specific memory vector from an agent's mind for a resource cost (50 gold), verifying the wipe dynamically.
 
-- **`/world`** — A 3D isometric voxel game (Three.js + React Three Fiber). Walk around Ashenvale, approach NPCs, and talk to them. The knowledge graph, chat log, rumor mill, and amnesia spell are all overlaid as a game HUD.
-- **`/play`** — The full analytical interface. Three-panel layout: NPC dialogue with streaming responses, live force-directed knowledge graph, engine controls and Cognee call monitor.
+There are two interfaces to interact with the engine:
+
+- **`/world`** — The 3D isometric simulation (Three.js + React Three Fiber). Walk around Ashenvale, approach agents, and trigger interactions. The knowledge graph, chat log, rumor mill, and memory pruning controls are overlaid as a simulation HUD.
+- **`/play`** — The full analytical dashboard. Three-panel layout: agent interaction loop with streaming responses, live force-directed knowledge graph, engine controls, and Cognee API call monitor.
 
 ---
 
 ## The Problem
 
-NPCs in games have been stateless since 1980. No Skyrim guard remembers you murdered that shopkeeper. No Cyberpunk fixer knows you betrayed their contact. Every session resets. Scripted dialogue trees cannot scale to real social memory.
+Autonomous agents in multi-agent systems are typically stateless or locked into narrow, isolated vector retrieval pipelines. Establishing relational trust, tracing rumor propagation, and targeted memory pruning (forgetting) traditionally require complex orchestration, custom databases, and brittle hardcoded state triggers. This does not scale to complex, emergent social networks.
 
 ---
 
