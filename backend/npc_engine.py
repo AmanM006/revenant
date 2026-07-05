@@ -313,7 +313,7 @@ async def process_dialogue(
             ),
             dataset_name=dataset_name,
             session_id=session_id,
-            graph_traversal=True,
+            graph_traversal=False,
         )
     except Exception as e:
         logger.warning(f"recall() failed for {npc_id}, continuing with empty context: {e}")
